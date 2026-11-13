@@ -396,32 +396,20 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
     async def reply(self, start: Callable[[TurnResult], AsyncIterator[StreamEvent]]) -> None:
         """Stream a reply; if a free model is busy, retry on another working free model."""
         tried: set[str] = set()
-        rescued = rewritten = False
+        done: set[str] = set()
         while True:
             try:
                 await self.stream_reply(start)
                 result = self.last_result
-                if result is None or result.cancelled:
+                retry = self.chat.next_attempt(result, done) if result is not None else None
+                if retry is None:
                     return
-                fallback = self.chat.refusal_fallback()
-                if result.refused and fallback and fallback != result.model and not rescued:
-                    # The model declined: the configured fallback writes this turn
-                    # instead (the declined version stays as an alternative, see /prev).
-                    rescued = True
-                    self.warn(self.t("refusal_fallback", old=result.model, new=fallback))
-                    start = lambda r, m=fallback: self.chat.regenerate(r, model=m)  # noqa: E731
-                    continue
-                if result.repeated and not result.refused and not rewritten and self.auto_rewrite():
-                    # Mostly recycled from earlier replies: ask once for a new one (the
-                    # repeated version stays as an alternative, see /prev).
-                    rewritten = True
-                    self.warn(self.t("rewrite_repeat", pct=f"{result.repetition:.0%}"))
-                    model = (
-                        result.model if result.model != self.chat.require_session().model else None
-                    )
-                    start = lambda r, m=model: self.chat.regenerate(r, model=m, fresh=True)  # noqa: E731
-                    continue
-                return
+                if retry.reason == "refusal":
+                    self.warn(self.t("refusal_fallback", old=result.model, new=retry.model))  # type: ignore[union-attr]
+                else:
+                    self.warn(self.t("rewrite_repeat", pct=f"{result.repetition:.0%}"))  # type: ignore[union-attr]
+                start = retry.start
+                continue
             except ProviderError as e:
                 ref = self.chat.model_ref()
                 if (
@@ -439,11 +427,6 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
                 self.chat.set_model(f"{ref.provider}:{nxt}")
                 self.warn(self.t("free_switch", old=ref.model, new=nxt))
                 start = self.chat.regenerate  # the user message is already saved
-
-    def auto_rewrite(self) -> bool:
-        # Only in stories: in a plain chat, asking the same thing twice may rightly
-        # get the same answer.
-        return self.chat.config.roleplay.rewrite_repeats and self.chat.character() is not None
 
     def can_fallback(self, e: ProviderError, model: str) -> bool:
         if not self.chat.config.models.free_fallback or not is_free_model(model):

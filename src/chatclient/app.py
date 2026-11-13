@@ -42,6 +42,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--set-key", metavar="PROVIDER", help="store an API key in the OS keychain")
     p.add_argument("--debug", action="store_true", help="verbose logging to the log file")
     p.add_argument(
+        "--serve",
+        action="store_true",
+        help="run headless for another front end: JSON lines on stdin/stdout (docs/PROTOCOL.md)",
+    )
+    p.add_argument(
         "--eval-memory",
         action="store_true",
         help="measure the memory brief with a real model (uses -m, else the utility/chat model)",
@@ -146,14 +151,12 @@ async def eval_memory(args: argparse.Namespace, config: Config, paths: AppPaths)
     return 0 if rate >= 0.5 else 1
 
 
-async def run(
+async def open_app(
     args: argparse.Namespace, config: Config, paths: AppPaths, t: Translator, notes: list[str]
-) -> int:
-    try:
-        tz = resolve_tz(config.memory.timezone)
-    except ValueError as e:
-        print(f"config: {e}", file=sys.stderr)
-        return 2
+) -> ChatService:
+    """Everything a front end needs: files synced, memory started, a session open and a
+    model chosen. Raises ChatError/ValueError with a message for the user."""
+    tz = resolve_tz(config.memory.timezone)
     library = Library(paths.data_dir)
     store = Store(paths.db_file, tz=tz, day_boundary=config.memory.day_boundary, library=library)
     library.sync(store)  # files are the source of truth; quick when nothing changed
@@ -165,33 +168,53 @@ async def run(
         await memory.start_semantic(paths.data_dir / "models")
     chat = ChatService(config, store, registry, memory)
     chat.seed_builtin_characters()
-    try:
-        if args.char:
-            char = store.find_character(args.char, "ai")
-            if char is None:
-                print(f"error: no character matches {args.char!r}", file=sys.stderr)
-                return 1
-            chat.new_session(character_id=char.id)
-        elif args.session:
-            chat.open_session(args.session)
-        elif args.new:
-            chat.new_session()
-        else:
-            chat.resume_or_create()
+    if args.char:
+        char = store.find_character(args.char, "ai")
+        if char is None:
+            raise ChatError(f"no character matches {args.char!r}")
+        chat.new_session(character_id=char.id)
+    elif args.session:
+        chat.open_session(args.session)
+    elif args.new:
+        chat.new_session()
+    else:
+        chat.resume_or_create()
 
-        if args.model:
-            chat.set_model(args.model)
-        elif chat.require_session().model is None:
-            default = chat.default_model()
-            if default:
-                chat.set_model(default)
+    if args.model:
+        chat.set_model(args.model)
+    elif chat.require_session().model is None:
+        default = chat.default_model()
+        if default:
+            chat.set_model(default)
+        else:
+            ref = await registry.autodetect()
+            if ref:
+                chat.set_model(str(ref))
+                notes.append(t("autodetected", model=str(ref)))
             else:
-                ref = await registry.autodetect()
-                if ref:
-                    chat.set_model(str(ref))
-                    notes.append(t("autodetected", model=str(ref)))
-                else:
-                    notes.append(t("no_local"))
+                notes.append(t("no_local"))
+    return chat
+
+
+async def close_app(chat: ChatService) -> None:
+    await chat.registry.aclose()
+    chat.store.close()
+
+
+async def run(
+    args: argparse.Namespace, config: Config, paths: AppPaths, t: Translator, notes: list[str]
+) -> int:
+    try:
+        chat = await open_app(args, config, paths, t, notes)
+    except (ChatError, ProviderError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2 if isinstance(e, ValueError) else 1
+    try:
+        if args.serve:
+            from chatclient.serve import serve_stdio
+
+            await serve_stdio(chat, notes)
+            return 0
 
         if args.prompt is not None:
             return await one_shot(chat, args.prompt, t)
@@ -206,8 +229,7 @@ async def run(
         print(f"error: {e}", file=sys.stderr)
         return 1
     finally:
-        await registry.aclose()
-        store.close()
+        await close_app(chat)
 
 
 async def one_shot(chat: ChatService, prompt: str, t: Translator) -> int:

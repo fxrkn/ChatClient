@@ -111,6 +111,13 @@ class TurnResult:
         return None if self.first_token_at is None else self.first_token_at - self.started
 
 
+@dataclass
+class Retry:
+    reason: str  # "refusal" | "repeat"
+    model: str  # who writes the new version
+    start: Callable[[TurnResult], AsyncIterator[StreamEvent]]
+
+
 class ChatService:
     def __init__(
         self,
@@ -680,6 +687,30 @@ class ChatService:
         if not spec:
             raise ChatError("no model selected")
         return parse_model_ref(spec)
+
+    def next_attempt(self, result: TurnResult, done: set[str]) -> Retry | None:
+        """After a reply: should this turn be written again, and how? (Same rules for
+        every front end.) ``done`` collects the reasons already tried this turn."""
+        if result.cancelled or not result.text:
+            return None
+        fallback = self.refusal_fallback()
+        if result.refused and fallback and fallback != result.model and "refusal" not in done:
+            # The model declined: the fallback writes this turn instead (the declined
+            # version stays as an alternative).
+            done.add("refusal")
+            return Retry("refusal", fallback, lambda r: self.regenerate(r, model=fallback))
+        rewrite = self.config.roleplay.rewrite_repeats and self.character() is not None
+        if result.repeated and not result.refused and rewrite and "repeat" not in done:
+            # Mostly recycled from earlier replies: ask once for a new one. Only in
+            # stories: in a plain chat the same question may rightly get the same answer.
+            done.add("repeat")
+            one_off = result.model if result.model != self.require_session().model else None
+            return Retry(
+                "repeat",
+                result.model,
+                lambda r: self.regenerate(r, model=one_off, fresh=True),
+            )
+        return None
 
     def refusal_fallback(self) -> str | None:
         """The model to rewrite a declined reply with: /fallback, else [models]."""
