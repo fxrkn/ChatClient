@@ -10,7 +10,7 @@ ChatClient aims to make conversations with AI models feel more human, natural, a
 
 ## Setup
 
-For installation instructions and configuration details, see [SETUP.md](SETUP.md).
+For installation instructions and configuration details, see [docs/SETUP.md](docs/SETUP.md).
 
 ## License
 
