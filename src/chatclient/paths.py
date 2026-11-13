@@ -26,6 +26,11 @@ class AppPaths:
         return self.config_dir / "config.toml"
 
     @property
+    def key_file(self) -> Path:
+        """API keys, used only when no OS keychain is available (owner-only permissions)."""
+        return self.config_dir / "keys.json"
+
+    @property
     def db_file(self) -> Path:
         return self.data_dir / "chatclient.db"
 

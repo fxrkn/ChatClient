@@ -143,6 +143,11 @@ class Provider(ABC):
     @abstractmethod
     async def list_models(self) -> list[str]: ...
 
+    async def verify_key(self) -> None:
+        """Raise ProviderError if the API key is rejected. Listing models needs auth
+        on most services; providers where it doesn't override this."""
+        await self.list_models()
+
     async def aclose(self) -> None:  # noqa: B027 - optional hook
         pass
 
@@ -191,6 +196,8 @@ class HttpProvider(Provider):
             hint = "\n(hint: lower the reply limit, e.g. /set max_tokens 2048, or add credits)"
         elif resp.status_code == 429:
             hint = "\n(hint: rate limited — wait a moment and /regen, or pick another model)"
+        elif resp.status_code in (401, 403):
+            hint = f"\n(hint: the API key is missing or was rejected — /key set {self.name})"
         raise ProviderError(
             f"{self.name}: HTTP {resp.status_code}: {extract_error_message(body)}{hint}",
             status=resp.status_code,

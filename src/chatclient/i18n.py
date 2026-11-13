@@ -89,6 +89,67 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "you": {"en": "You", "tr": "Sen"},
     "model_load": {"en": "model load {s}s", "tr": "model yükleme {s}s"},
+    "key_usage": {
+        "en": "Usage: /key set <provider>  (providers: {names})",
+        "tr": "Kullanım: /key set <sağlayıcı>  (sağlayıcılar: {names})",
+    },
+    "key_unknown": {
+        "en": "Unknown provider '{name}' (key providers: {names})",
+        "tr": "Bilinmeyen sağlayıcı '{name}' (anahtar kullananlar: {names})",
+    },
+    "key_prompt": {
+        "en": "API key for {name} (hidden, Enter to cancel): ",
+        "tr": "{name} API anahtarı (gizli, iptal için boş Enter): ",
+    },
+    "key_checking": {"en": "Checking the key…", "tr": "Anahtar kontrol ediliyor…"},
+    "key_rejected": {
+        "en": "{name} rejected this key; nothing was saved. Copy it again and retry.",
+        "tr": "{name} bu anahtarı reddetti; kaydedilmedi. Anahtarı yeniden kopyalayıp tekrar deneyin.",
+    },
+    "key_unverified": {
+        "en": "Could not verify the key ({error}); saving it anyway.",
+        "tr": "Anahtar doğrulanamadı ({error}); yine de kaydediliyor.",
+    },
+    "key_save_failed": {
+        "en": "Could not save the key: {error}",
+        "tr": "Anahtar kaydedilemedi: {error}",
+    },
+    "key_saved_keychain": {
+        "en": "✓ Key for {name} saved in the OS keychain.",
+        "tr": "✓ {name} anahtarı sistem anahtar deposuna kaydedildi.",
+    },
+    "key_saved_file": {
+        "en": "✓ Key for {name} saved to {path} (readable only by you; no OS keychain found).",
+        "tr": "✓ {name} anahtarı {path} dosyasına kaydedildi (yalnızca siz okuyabilirsiniz; sistem anahtar deposu bulunamadı).",
+    },
+    "key_env_override": {
+        "en": "Note: the {env} environment variable is set and takes priority over the saved key.",
+        "tr": "Not: {env} ortam değişkeni tanımlı ve kaydedilen anahtarın önüne geçiyor.",
+    },
+    "key_removed": {
+        "en": "Removed the saved key for {name}.",
+        "tr": "{name} için kayıtlı anahtar silindi.",
+    },
+    "key_nothing_removed": {
+        "en": "No saved key for {name}.",
+        "tr": "{name} için kayıtlı anahtar yok.",
+    },
+    "key_still_from": {
+        "en": "A key is still provided by: {source}",
+        "tr": "Anahtar hâlâ şuradan geliyor: {source}",
+    },
+    "key_missing": {
+        "en": "No API key for {name}. Add one with: /key set {name}",
+        "tr": "{name} için API anahtarı yok. Eklemek için: /key set {name}",
+    },
+    "key_list_hint": {
+        "en": "/key set <provider> to add or replace · /key remove <provider>",
+        "tr": "Eklemek/değiştirmek için /key set <sağlayıcı> · silmek için /key remove <sağlayıcı>",
+    },
+    "key_src_env": {"en": "environment variable", "tr": "ortam değişkeni"},
+    "key_src_keychain": {"en": "OS keychain", "tr": "sistem anahtar deposu"},
+    "key_src_file": {"en": "key file", "tr": "anahtar dosyası"},
+    "key_src_config": {"en": "config.toml", "tr": "config.toml"},
     "builtin": {"en": "built-in", "tr": "hazır"},
     "char_none": {
         "en": "No character in this session (plain chat). /char list shows characters.",
@@ -255,6 +316,8 @@ STRINGS: dict[str, dict[str, str]] = {
   /char export [name]    save a character as a .json card
   /persona [set|clear]   tell characters who you are
   /free [list|all|N]     test free OpenRouter models and switch to the fastest
+  /key [set|remove] [provider]
+                         show, add or remove API keys (stored securely)
   /theme [name|reset]    show or switch the colour theme
   /clear                 clear the screen (history is kept)
   /config                show config and data file locations
@@ -283,6 +346,8 @@ Keys: Enter send · Alt+Enter new line · Ctrl+C stop a reply · Ctrl+D quit""",
   /char export [ad]      karakteri .json kart olarak kaydet
   /persona [set|clear]   karakterlere kim olduğunuzu anlatın
   /free [list|all|N]     ücretsiz OpenRouter modellerini test et, en hızlısına geç
+  /key [set|remove] [sağlayıcı]
+                         API anahtarlarını göster, ekle ya da sil (güvenli saklanır)
   /theme [ad|reset]      renk temasını göster/değiştir
   /clear                 ekranı temizle (geçmiş silinmez)
   /config                ayar ve veri dosyalarının konumunu göster

@@ -27,6 +27,20 @@ ELIF = Card(
 )
 
 
+@pytest.fixture(autouse=True)
+def fake_keychain(monkeypatch):
+    """Tests never touch the real OS keychain: an in-memory one replaces it."""
+    import keyring
+
+    vault: dict[tuple[str, str], str] = {}
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: vault.get((s, u)))
+    monkeypatch.setattr(keyring, "set_password", lambda s, u, p: vault.__setitem__((s, u), p))
+    monkeypatch.setattr(keyring, "delete_password", lambda s, u: vault.pop((s, u)))
+    for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    return vault
+
+
 @pytest.fixture
 def store(tmp_path):
     s = Store(tmp_path / "test.db")

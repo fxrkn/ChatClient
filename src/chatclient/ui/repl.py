@@ -37,6 +37,7 @@ from chatclient.paths import AppPaths
 from chatclient.providers.base import ProviderError, StreamEvent
 from chatclient.theme import PRESETS, Theme, ansi, ptk_color, resolve_theme, rich_style
 from chatclient.ui.characters_ui import CHAR_SUBCOMMANDS, CharacterCommands
+from chatclient.ui.keys_ui import KEY_SUBCOMMANDS, KeyCommands
 from chatclient.ui.render import BOLD, RESET, StreamWriter, reading_width
 
 THEME_KEY = "ui_theme"
@@ -45,14 +46,21 @@ INDENT = "  "
 COMMANDS = [
     "/help", "/new", "/sessions", "/switch", "/rename", "/delete", "/history",
     "/model", "/models", "/providers", "/system", "/set", "/regen", "/undo",
-    "/search", "/free", "/char", "/persona", "/theme", "/clear", "/config", "/quit", "/exit",
+    "/search", "/free", "/char", "/persona", "/key", "/theme", "/clear", "/config", "/quit",
+    "/exit",
 ]  # fmt: skip
 
 
 class SlashCompleter(Completer):
-    def __init__(self, models: Callable[[], list[str]], chars: Callable[[], list[str]]):
+    def __init__(
+        self,
+        models: Callable[[], list[str]],
+        chars: Callable[[], list[str]],
+        providers: Callable[[], list[str]] = list,
+    ):
         self.models = models
         self.chars = chars
+        self.providers = providers
 
     def get_completions(self, document: Document, event: CompleteEvent) -> Iterable[Completion]:
         text = document.text_before_cursor
@@ -87,13 +95,23 @@ class SlashCompleter(Completer):
                 for n in self.chars():
                     if n.lower().startswith(low):
                         yield Completion(n, start_position=-len(name))
+        elif cmd == "/key":
+            sub, space, name = arg.partition(" ")
+            if not space:
+                for s in KEY_SUBCOMMANDS:
+                    if s.startswith(sub):
+                        yield Completion(s, start_position=-len(sub))
+            elif sub in ("set", "remove"):
+                for n in self.providers():
+                    if n.startswith(name):
+                        yield Completion(n, start_position=-len(name))
         elif cmd == "/persona" and " " not in arg:
             for s in ("set", "clear"):
                 if s.startswith(arg):
                     yield Completion(s, start_position=-len(arg))
 
 
-class Repl(CharacterCommands):
+class Repl(CharacterCommands, KeyCommands):
     def __init__(self, chat: ChatService, t: Translator, paths: AppPaths, show_stats: bool = True):
         self.chat = chat
         self.t = t
@@ -222,7 +240,9 @@ class Repl(CharacterCommands):
 
         session: PromptSession[str] = PromptSession(
             history=FileHistory(str(self.paths.history_file)),
-            completer=SlashCompleter(lambda: self.known_models, self.char_names),
+            completer=SlashCompleter(
+                lambda: self.known_models, self.char_names, self.key_providers
+            ),
             complete_while_typing=True,
             key_bindings=kb,
             multiline=True,
@@ -315,6 +335,8 @@ class Repl(CharacterCommands):
         name = find_openrouter(self.chat.registry)
         if name is None:
             raise ChatError(self.t("free_no_openrouter"))
+        if not self.chat.registry.get(name).api_key:
+            raise ChatError(self.t("key_missing", name=name))
         if arg == "list":
             cached = load_working(self.chat.store, name)
             if not cached:
@@ -498,6 +520,8 @@ class Repl(CharacterCommands):
                 await self.persona_command(arg)
             case "/theme":
                 self.theme_command(arg)
+            case "/key" | "/keys":
+                await self.key_command(arg)
             case "/undo":
                 n = self.chat.undo()
                 self.info(self.t("undone", n=n))

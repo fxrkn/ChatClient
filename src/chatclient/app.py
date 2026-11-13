@@ -13,12 +13,13 @@ import warnings
 from logging.handlers import RotatingFileHandler
 
 from chatclient import __version__
-from chatclient.config import Config, ConfigError, load_config, store_api_key
+from chatclient.config import Config, ConfigError, load_config
 from chatclient.core.chat import ChatError, ChatService, TurnResult
 from chatclient.i18n import Translator
+from chatclient.keys import SOURCE_KEYCHAIN, KeyStore
 from chatclient.paths import AppPaths, resolve_paths
 from chatclient.providers.base import ProviderError
-from chatclient.providers.registry import ProviderRegistry
+from chatclient.providers.registry import ProviderRegistry, verify_key
 from chatclient.storage import Store
 from chatclient.timeutil import resolve_tz
 
@@ -75,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     t = Translator(args.lang or config.ui.language)
 
     if args.set_key:
-        return set_key(args.set_key, config)
+        return set_key(args.set_key, config, KeyStore(paths.key_file))
 
     notes = [t("config_created", path=paths.config_file)] if created else []
     try:
@@ -84,10 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
 
-def set_key(provider: str, config: Config) -> int:
+def set_key(provider: str, config: Config, keys: KeyStore) -> int:
     if provider not in config.providers:
         print(f"unknown provider '{provider}' (configured: {', '.join(config.providers)})")
         return 2
+    pc = config.providers[provider]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", getpass.GetPassWarning)
@@ -99,13 +101,23 @@ def set_key(provider: str, config: Config) -> int:
         print("no key entered")
         return 1
     try:
-        store_api_key(provider, key)
+        asyncio.run(verify_key(provider, pc, key))
+    except ProviderError as e:
+        if e.status in (401, 403):
+            print(f"the key was rejected by {provider}; nothing was saved")
+            return 1
+        print(f"could not verify the key ({e}); saving it anyway")
+    try:
+        where = keys.save(provider, key)
     except Exception as e:
-        env = config.providers[provider].api_key_env or f"{provider.upper()}_API_KEY"
-        print(f"could not store key in the OS keychain: {e}")
+        env = pc.api_key_env or f"{provider.upper()}_API_KEY"
+        print(f"could not store the key: {e}")
         print(f"use an environment variable instead, e.g. {env}=<your key>")
         return 1
-    print(f"stored key for {provider} in the OS keychain")
+    place = "the OS keychain" if where == SOURCE_KEYCHAIN else str(keys.file)
+    print(f"saved the key for {provider} in {place}")
+    if pc.api_key_env and os.environ.get(pc.api_key_env):
+        print(f"note: the {pc.api_key_env} environment variable is set and takes priority")
     return 0
 
 
@@ -118,7 +130,7 @@ async def run(
         print(f"config: {e}", file=sys.stderr)
         return 2
     store = Store(paths.db_file, tz=tz, day_boundary=config.memory.day_boundary)
-    registry = ProviderRegistry(config)
+    registry = ProviderRegistry(config, KeyStore(paths.key_file))
     chat = ChatService(config, store, registry)
     chat.seed_builtin_characters()
     try:

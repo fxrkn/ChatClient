@@ -7,7 +7,8 @@ import logging
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from chatclient.config import Config, ProviderConfig, resolve_api_key
+from chatclient.config import Config, ProviderConfig
+from chatclient.keys import KeyStore
 from chatclient.providers.base import Provider, ProviderError
 
 log = logging.getLogger(__name__)
@@ -32,8 +33,16 @@ def parse_model_ref(spec: str) -> ModelRef:
     return ModelRef(provider, model)
 
 
-def _build(name: str, pc: ProviderConfig) -> Provider:
-    key = resolve_api_key(name, pc) if pc.type != "echo" else None
+async def verify_key(name: str, pc: ProviderConfig, key: str) -> None:
+    """Raise ProviderError if ``key`` is rejected (uses a throwaway provider instance)."""
+    provider = _build(name, pc, key)
+    try:
+        await provider.verify_key()
+    finally:
+        await provider.aclose()
+
+
+def _build(name: str, pc: ProviderConfig, key: str | None) -> Provider:
     match pc.type:
         case "openai_compat":
             from chatclient.providers.openai_compat import OpenAICompatProvider
@@ -66,11 +75,12 @@ def is_local(pc: ProviderConfig) -> bool:
 
 
 class ProviderRegistry:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, keys: KeyStore | None = None):
         self.configs: dict[str, ProviderConfig] = {
             **config.providers,
             ECHO: ProviderConfig(type="echo"),
         }
+        self.keys = keys or KeyStore()
         self._instances: dict[str, Provider] = {}
 
     def names(self) -> list[str]:
@@ -81,8 +91,22 @@ class ProviderRegistry:
             known = ", ".join(self.configs)
             raise ProviderError(f"unknown provider '{name}' (configured: {known})")
         if name not in self._instances:
-            self._instances[name] = _build(name, self.configs[name])
+            pc = self.configs[name]
+            key = self.keys.get(name, pc) if pc.type != "echo" else None
+            self._instances[name] = _build(name, pc, key)
         return self._instances[name]
+
+    def needs_key(self, name: str) -> bool:
+        """Cloud providers need a key; local servers and the echo model don't."""
+        pc = self.configs[name]
+        return pc.type in ("anthropic", "gemini") or (
+            pc.type == "openai_compat" and not is_local(pc)
+        )
+
+    async def reset(self, name: str) -> None:
+        """Drop a cached provider so the next use picks up a new API key."""
+        if (p := self._instances.pop(name, None)) is not None:
+            await p.aclose()
 
     def context_tokens(self, provider: str) -> int | None:
         pc = self.configs.get(provider)

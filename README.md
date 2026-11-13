@@ -48,16 +48,17 @@ ollama pull qwen3.5:4b
 
 ChatClient finds a running Ollama, LM Studio or llama.cpp server automatically.
 
-**Cloud:** set an API key as an environment variable, for example
-`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GEMINI_API_KEY`,
-or store it in the OS keychain:
+**Cloud:** add your API key from inside the app (the key is checked before it is saved):
 
-```bash
-chatclient --set-key openrouter
+```
+/key set openrouter
 ```
 
-(On Linux the keychain needs a Secret Service provider such as GNOME Keyring;
-without one, use an environment variable.)
+Keys are stored in the OS keychain (Windows Credential Manager, macOS Keychain,
+GNOME Keyring/KWallet). Where no keychain is available, for example on a Linux server,
+they go to `keys.json` in the config folder, readable only by your user.
+Environment variables such as `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY` or `GEMINI_API_KEY` also work and take priority.
 
 ### Development
 

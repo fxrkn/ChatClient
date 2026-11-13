@@ -122,6 +122,17 @@ class OpenAICompatProvider(HttpProvider):
             if text or usage or finish:
                 yield StreamEvent(text=text, usage=usage, finish_reason=finish)
 
+    async def verify_key(self) -> None:
+        # OpenRouter lists models without auth, so check the key endpoint instead.
+        if "openrouter.ai" in self.base_url:
+            try:
+                resp = await self.client.get(f"{self.base_url}/key", timeout=10.0)
+            except httpx.HTTPError as e:
+                raise self.connection_error(e) from e
+            await self.raise_for_status(resp)
+            return
+        await self.list_models()
+
     async def list_model_info(self) -> list[dict[str, Any]]:
         """Raw model entries (OpenRouter includes pricing, context length, created...)."""
         try:

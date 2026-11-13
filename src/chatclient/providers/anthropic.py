@@ -122,7 +122,7 @@ class AnthropicProvider(Provider):
                 raise ProviderError(f"{self.name}: {e.message}", status=400) from e
             except anthropic.APIStatusError as e:
                 raise ProviderError(
-                    f"{self.name}: HTTP {e.status_code}: {e.message}",
+                    f"{self.name}: HTTP {e.status_code}: {e.message}{self._key_hint(e.status_code)}",
                     status=e.status_code,
                     retryable=e.status_code in (408, 429) or e.status_code >= 500,
                 ) from e
@@ -161,9 +161,17 @@ class AnthropicProvider(Provider):
         try:
             return sorted([m.id async for m in self.client.models.list(limit=100)])
         except anthropic.APIStatusError as e:
-            raise ProviderError(f"{self.name}: HTTP {e.status_code}: {e.message}") from e
+            raise ProviderError(
+                f"{self.name}: HTTP {e.status_code}: {e.message}{self._key_hint(e.status_code)}",
+                status=e.status_code,
+            ) from e
         except anthropic.APIConnectionError as e:
             raise ProviderError(f"{self.name}: connection failed: {e}") from e
+
+    def _key_hint(self, status: int) -> str:
+        if status in (401, 403):
+            return f"\n(hint: the API key is missing or was rejected — /key set {self.name})"
+        return ""
 
     async def aclose(self) -> None:
         if self._client is not None:

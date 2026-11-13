@@ -7,7 +7,6 @@ provider settings → per-session overrides (stored in the database, set via /se
 from __future__ import annotations
 
 import logging
-import os
 import tomllib
 from pathlib import Path
 from typing import Literal
@@ -279,26 +278,3 @@ def load_config(path: Path, *, create: bool = True) -> Config:
             loc = ".".join(str(p) for p in err["loc"])
             lines.append(f"  {loc}: {err['msg']}")
         raise ConfigError("\n".join(lines)) from e
-
-
-def resolve_api_key(provider_name: str, pc: ProviderConfig) -> str | None:
-    """Env var → OS keychain → literal value in config."""
-    if pc.api_key_env:
-        val = os.environ.get(pc.api_key_env)
-        if val:
-            return val.strip()
-    try:
-        import keyring
-
-        val = keyring.get_password(KEYRING_SERVICE, provider_name)
-        if val:
-            return val.strip()
-    except Exception as e:  # no backend, locked keychain, ...
-        log.debug("keyring lookup failed for %s: %s", provider_name, e)
-    return pc.api_key or None
-
-
-def store_api_key(provider_name: str, key: str) -> None:
-    import keyring
-
-    keyring.set_password(KEYRING_SERVICE, provider_name, key)
