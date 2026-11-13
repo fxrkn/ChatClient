@@ -18,12 +18,16 @@ dependencies = [
     "rich>=13.7",
     "keyring>=25",
     "tzdata>=2024.1",
+    # meaning-based recall: a small local multilingual model (downloaded on first use)
+    "fastembed>=0.5",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
     "respx>=0.21",
     "ruff>=0.6",
 ]
@@ -44,6 +48,7 @@ include = ["src/chatclient", "tests", "README.md", "LICENSE"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+timeout = 60  # scripted terminal tests must fail, not hang, if input runs out
 
 [tool.ruff]
 line-length = 100

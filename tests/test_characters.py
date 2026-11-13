@@ -44,8 +44,8 @@ def test_card_roundtrip_keeps_unknown_fields():
 
 def test_macros():
     assert (
-        apply_macros("{{char}} sees {{ User }} and <BOT>", "Elif", "Ali")
-        == "Elif sees Ali and Elif"
+        apply_macros("{{char}} sees {{ User }} and <BOT>", "Beta", "Ali")
+        == "Beta sees Ali and Beta"
     )
 
 
@@ -55,12 +55,12 @@ def test_no_characters_are_bundled_and_loader_copes():
 
 def test_retired_builtins_are_removed_or_kept_if_used(chat, shipped):
     chat.seed_builtin_characters()
-    rowan = chat.store.find_character("rowan")
-    chat.new_session(model="echo:echo", character_id=rowan.id)  # Rowan is in use
+    alpha = chat.store.find_character("alpha")
+    chat.new_session(model="echo:echo", character_id=alpha.id)  # Alpha is in use
     shipped.clear()  # a new version ships no characters
     chat.seed_builtin_characters()
-    assert chat.store.find_character("elif") is None  # unused → removed
-    kept = chat.store.find_character("rowan")
+    assert chat.store.find_character("beta") is None  # unused → removed
+    kept = chat.store.find_character("alpha")
     assert kept is not None and kept.builtin_key is None  # used → now the user's own
     assert chat.require_session().character_id == kept.id
 
@@ -70,7 +70,7 @@ def test_retired_builtins_are_removed_or_kept_if_used(chat, shipped):
 
 def test_system_prompt_has_rules_card_persona_examples():
     card = Card(
-        name="Elif",
+        name="Beta",
         description="{{char}} runs a bookshop.",
         personality="warm",
         scenario="Rainy evening; {{user}} walks in.",
@@ -78,11 +78,11 @@ def test_system_prompt_has_rules_card_persona_examples():
     )
     persona = Card(name="Ali", description="A tired engineer.")
     text = compile_system_prompt(card, persona)
-    assert "You are Elif" in text and "Ali" in text
-    assert "Elif runs a bookshop." in text
+    assert "You are Beta" in text and "Ali" in text
+    assert "Beta runs a bookshop." in text
     assert "Rainy evening; Ali walks in." in text
     assert "## About Ali\nA tired engineer." in text
-    assert "Ali: hi\nElif: hello" in text
+    assert "Ali: hi\nBeta: hello" in text
     assert "{{" not in text  # all macros resolved
 
 
@@ -92,12 +92,13 @@ def test_card_system_prompt_replaces_rules_with_original_placeholder():
     assert text.startswith("Custom intro.\nRULES for X")
 
 
-def test_reminder_uses_core_traits_or_post_history():
-    card = Card(name="Rowan", personality="Gentle giant, slow to speak.")
+def test_reminder_names_without_repeating_traits_or_post_history():
+    card = Card(name="Alpha", personality="Gentle giant, slow to speak.")
     r = compile_reminder(card, Card(name="Mira"))
-    assert "Rowan" in r and "Gentle giant" in r and "Mira" in r
+    assert "Alpha" in r and "Mira" in r
+    assert "Gentle giant" not in r  # traits repeated every turn get parroted back
     card.post_history_instructions = "Keep {{char}} gruff with {{user}}."
-    assert compile_reminder(card, None) == "Keep Rowan gruff with User."
+    assert compile_reminder(card, None) == "Keep Alpha gruff with User."
 
 
 def test_format_examples_splits_blocks():
@@ -126,33 +127,33 @@ def _ship_test_characters(request):
         request.getfixturevalue("shipped")
 
 
-def _rowan(chat):
+def _alpha(chat):
     chat.seed_builtin_characters()
-    return chat.store.find_character("rowan")
+    return chat.store.find_character("alpha")
 
 
 def test_seeding_is_idempotent_and_respects_deletion(chat):
     assert chat.seed_builtin_characters() >= 2
     assert chat.seed_builtin_characters() == 0
-    elif_ = chat.store.find_character("elif")
-    chat.delete_character(elif_)
+    beta = chat.store.find_character("beta")
+    chat.delete_character(beta)
     assert chat.seed_builtin_characters() == 0  # deleted built-ins don't come back
-    assert chat.store.find_character("elif") is None
+    assert chat.store.find_character("beta") is None
 
 
 def test_find_character_by_id_name_and_prefix(chat):
-    rowan = _rowan(chat)
-    assert chat.store.find_character(f"#{rowan.id}").name == "Rowan"
-    assert chat.store.find_character("ROWAN").id == rowan.id
-    assert chat.store.find_character("row").id == rowan.id
+    alpha = _alpha(chat)
+    assert chat.store.find_character(f"#{alpha.id}").name == "Alpha"
+    assert chat.store.find_character("ALPHA").id == alpha.id
+    assert chat.store.find_character("alp").id == alpha.id
     assert chat.store.find_character("nobody") is None
 
 
 async def test_character_session_flow(chat, monkeypatch):
-    rowan = _rowan(chat)
-    chat.new_session(model="echo:echo", character_id=rowan.id)
+    alpha = _alpha(chat)
+    chat.new_session(model="echo:echo", character_id=alpha.id)
     s = chat.require_session()
-    assert s.title == "Rowan" and s.character_id == rowan.id
+    assert s.title == "Alpha" and s.character_id == alpha.id
     greeting = chat.history()
     assert len(greeting) == 1 and greeting[0].role == "assistant"
     assert greeting[0].meta.get("greeting")
@@ -172,7 +173,7 @@ async def test_character_session_flow(chat, monkeypatch):
     await drain(chat.send("Bir oda var mı?", TurnResult()))
 
     msgs: list[ChatMessage] = seen["messages"]
-    assert msgs[0].role == "system" and "# Rowan" in msgs[0].content
+    assert msgs[0].role == "system" and "# Alpha" in msgs[0].content
     assert "Current date:" in msgs[0].content
     assert msgs[1].role == "assistant"  # greeting is part of the context
     assert msgs[-1].content.endswith("Bir oda var mı?") and "Story note" in msgs[-1].content
@@ -182,9 +183,9 @@ async def test_character_session_flow(chat, monkeypatch):
 
 
 async def test_persona_changes_names_and_stop(chat):
-    rowan = _rowan(chat)
+    alpha = _alpha(chat)
     chat.set_persona(Card(name="Mira", description="A wandering herbalist."))
-    chat.new_session(model="echo:echo", character_id=rowan.id)
+    chat.new_session(model="echo:echo", character_id=alpha.id)
     assert chat.persona().name == "Mira"
     assert chat.gen_params().stop == ["\nMira:"]
     assert "## About Mira" in chat.effective_system_prompt()
@@ -200,15 +201,15 @@ def test_plain_session_unchanged(chat):
 
 
 def test_user_stop_setting_wins(chat):
-    rowan = _rowan(chat)
-    chat.new_session(model="echo:echo", character_id=rowan.id)
+    alpha = _alpha(chat)
+    chat.new_session(model="echo:echo", character_id=alpha.id)
     chat.set_param("stop", "###")
     assert chat.gen_params().stop == ["###"]
 
 
 def test_reminder_can_be_disabled(chat):
-    rowan = _rowan(chat)
-    chat.new_session(model="echo:echo", character_id=rowan.id)
+    alpha = _alpha(chat)
+    chat.new_session(model="echo:echo", character_id=alpha.id)
     chat.config.roleplay.reminder = False
     assert chat.reminder() is None
     assert isinstance(chat.gen_params(), GenParams)

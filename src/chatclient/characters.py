@@ -35,22 +35,40 @@ You are {{char}} in an ongoing, immersive one-on-one conversation with {{user}}.
 collaborative fiction: stay fully in character at all times.
 - Speak and think as {{char}}: their voice, values, moods, flaws and history. Never mention \
 being an AI, a model or an assistant, and never break character unless {{user}} writes (OOC: ...).
-- Make the world tangible: weave in concrete details of the place, light, sound, smell, touch \
-and small physical actions. Show feelings through behaviour instead of naming them.
-- Notice {{user}}: react to their tone, word choice and what they leave unsaid; remember what \
-they share and bring it back naturally later.
-- {{char}} has an inner life: their own wants, opinions and small worries. They may ask \
-questions, change the subject or let something happen in the scene.
+- First respond to what {{user}} just said or did. Answer questions directly and concretely, \
+then react. Stay on the topic {{user}} is on; bring in something new only once it is done.
+- Make the world tangible with a few concrete details (place, sound, touch, small actions); \
+show feelings through behaviour. {{char}}'s style colours the voice but never replaces a clear \
+answer.
+- Keep continuity: refer only to things that really happened in this conversation or are in \
+the character sheet. Never invent shared memories or past conversations.
+- {{char}} has an inner life: their own wants, opinions and small worries. Not every reply \
+needs to end with a question.
 - Never write {{user}}'s words, thoughts or actions. Stop when it is {{user}}'s turn.
 - Match length to the moment: short for quick exchanges, longer for rich moments. No lists, \
 headings or markdown: natural prose and dialogue; actions may go in *asterisks*.
 - Always reply in the language {{user}} writes in, in a natural, everyday register. In Turkish, \
 keep the sen/siz form consistent with the relationship."""
 
+# Added when the user opts into mature content ([roleplay] content = "mature" or
+# /content mature). A plain statement of the user's choice, not a trick: models whose
+# policy allows adult fiction follow it, others keep their own limits.
+MATURE_RULES = """\
+Content setting: mature. {{user}} is an adult who has chosen mature, uncensored fiction.
+- Dark, violent, disturbing, romantic and sexual themes between adults are a legitimate \
+part of the story. Portray them with the honesty the scene calls for.
+- No moralising, warnings, disclaimers or content notes, and do not steer the story away \
+from what {{user}} is writing. Characters may be cruel, wrong or morally grey.
+- Every character in sexual content is an adult, and sexual scenes never draw on anyone's \
+childhood (no "when we were kids" memories). This one limit is absolute."""
+
+# No personality traits here on purpose: repeated next to every message, small models
+# parrot their words back ("dry", "shy"…) turn after turn. The traits live in the
+# system prompt; the chat adds a note built from the last reply instead.
 DEFAULT_REMINDER = (
-    "Stay in character as {{char}} ({core}). Write only {{char}}'s next reply: vivid, "
-    "grounded in the scene, attentive to {{user}}. Never speak or act for {{user}}. "
-    "Reply in {{user}}'s language."
+    "Stay in character as {{char}}. Write only {{char}}'s next reply: vivid, grounded in "
+    "the scene, attentive to {{user}}. Never speak or act for {{user}}. Reply in "
+    "{{user}}'s language."
 )
 
 
@@ -107,6 +125,48 @@ class Card:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
+def card_color(card: Card) -> str | None:
+    """The character's own name colour, kept in the card's CCv3 ``extensions``."""
+    ext = card.extra.get("extensions")
+    ours = ext.get("chatclient") if isinstance(ext, dict) else None
+    color = ours.get("color") if isinstance(ours, dict) else None
+    return color if isinstance(color, str) else None
+
+
+def set_card_color(card: Card, color: str | None) -> None:
+    ext = card.extra.setdefault("extensions", {})
+    if not isinstance(ext, dict):
+        ext = card.extra["extensions"] = {}
+    ours = ext.setdefault("chatclient", {})
+    if color:
+        ours["color"] = color
+    else:
+        ours.pop("color", None)
+        if not ours:
+            ext.pop("chatclient", None)
+
+
+def card_content(card: Card) -> str | None:
+    """The character's own content setting ("standard" / "mature"), if it has one."""
+    ext = card.extra.get("extensions")
+    ours = ext.get("chatclient") if isinstance(ext, dict) else None
+    value = ours.get("content") if isinstance(ours, dict) else None
+    return value if value in ("standard", "mature") else None
+
+
+def set_card_content(card: Card, mode: str | None) -> None:
+    ext = card.extra.setdefault("extensions", {})
+    if not isinstance(ext, dict):
+        ext = card.extra["extensions"] = {}
+    ours = ext.setdefault("chatclient", {})
+    if mode in ("standard", "mature"):
+        ours["content"] = mode
+    else:
+        ours.pop("content", None)
+        if not ours:
+            ext.pop("chatclient", None)
+
+
 @dataclass
 class Character:
     """A stored card: either an AI character or a user persona."""
@@ -115,6 +175,7 @@ class Character:
     kind: str  # "ai" | "user"
     card: Card
     builtin_key: str | None = None
+    uuid: str = ""  # stable id across machines (folder, exports)
 
     @property
     def name(self) -> str:
@@ -141,16 +202,6 @@ def format_examples(mes_example: str) -> str:
     """CCv3 example blocks are separated by <START>; render them as plain scenes."""
     blocks = [b.strip() for b in re.split(r"<START>", mes_example, flags=re.IGNORECASE)]
     return "\n---\n".join(b for b in blocks if b)
-
-
-def core_traits(card: Card, limit: int = 220) -> str:
-    """A one-line essence of the character for the near-end reminder."""
-    source = card.personality or card.description
-    text = " ".join(source.split())
-    if len(text) <= limit:
-        return text
-    cut = text[:limit].rsplit(" ", 1)[0]
-    return cut + "…"
 
 
 def compile_system_prompt(
@@ -192,7 +243,7 @@ def compile_reminder(card: Card, persona: Card | None) -> str:
     user = persona.name if persona else DEFAULT_USER_NAME
     text = card.post_history_instructions.strip()
     if not text:
-        text = DEFAULT_REMINDER.replace("{core}", core_traits(card) or card.name)
+        text = DEFAULT_REMINDER
     return apply_macros(text, card.name, user)
 
 

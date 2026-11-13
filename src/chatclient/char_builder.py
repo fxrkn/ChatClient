@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from chatclient.characters import Card
+from chatclient.characters import Card, card_content, set_card_content
 from chatclient.providers.base import ChatMessage, GenParams, Provider, ThinkFilter
 
 # ── wizard options ──────────────────────────────────────────────────────────
@@ -33,6 +33,36 @@ def _opts(pairs: Sequence[tuple[str, str]]) -> list[Option]:
 
 
 OPTIONS: dict[str, dict[str, list[Option]]] = {
+    "content": {
+        "tr": _opts([("Standart", "standard"), ("Yetişkin (18+)", "mature")]),
+        "en": _opts([("Standard", "standard"), ("Mature (18+)", "mature")]),
+    },
+    "gender": {
+        "tr": _opts([("Erkek", "erkek"), ("Kadın", "kadın"), ("Non-binary", "non-binary")]),
+        "en": _opts([("Man", "man"), ("Woman", "woman"), ("Non-binary", "non-binary person")]),
+    },
+    "themes": {
+        "tr": _opts(
+            [
+                ("Romantizm", "romantizm ve tutku"),
+                ("Açık cinsellik", "açık, ayrıntılı cinsellik"),
+                ("Karanlık / şiddet", "karanlık temalar ve şiddet"),
+                ("Psikolojik drama", "psikolojik gerilim ve drama"),
+                ("Fetiş / BDSM", "fetiş ve BDSM"),
+                ("Korku", "korku"),
+            ]
+        ),
+        "en": _opts(
+            [
+                ("Romance", "romance and passion"),
+                ("Explicit sex", "explicit, detailed sex"),
+                ("Dark / violent", "dark themes and violence"),
+                ("Psychological drama", "psychological tension and drama"),
+                ("Kink / BDSM", "kink and BDSM"),
+                ("Horror", "horror"),
+            ]
+        ),
+    },
     "temperament": {
         "tr": _opts(
             [
@@ -214,17 +244,42 @@ def parse_choice(answer: str, opts: Sequence[Option], max_n: int) -> list[str]:
     return [answer]
 
 
+ADULT_AGE = 18
+
+
+def parse_age(text: str) -> int | None:
+    """The number in an age answer ("28", "28 yaşında", "about 30"), if there is one."""
+    m = re.search(r"\d{1,3}", text)
+    return int(m.group()) if m else None
+
+
+def age_ok(text: str, content: str) -> bool:
+    """Mature characters need a stated adult age; others may leave it vague or empty."""
+    if content != "mature":
+        return True
+    age = parse_age(text)
+    return age is not None and age >= ADULT_AGE
+
+
 @dataclass
 class WizardAnswers:
     name: str
+    content: str = "standard"  # "standard" | "mature"
+    age: str = ""
+    gender: list[str] | None = None
     concept: str = ""
+    appearance: str = ""
     temperament: list[str] | None = None
     speech: list[str] | None = None
     values: list[str] | None = None
     fear: list[str] | None = None
+    likes: str = ""
+    backstory: str = ""
     relationship: list[str] | None = None
+    history: str = ""  # what has happened between them so far
     genre: list[str] | None = None
     place: str = ""
+    themes: list[str] | None = None
     example: str = ""
 
 
@@ -233,11 +288,33 @@ def _join(items: list[str] | None, lang: str) -> str:
     return "; ".join(i for i in items or [] if i)
 
 
+def _sentence(text: str) -> str:
+    text = text.strip()
+    return text if not text or text[-1] in ".!?…" else text + "."
+
+
+def _identity(a: WizardAnswers, tr: bool) -> str:
+    """'{{char}} is a 28-year-old man.' from whatever age/gender was given."""
+    age, gender = a.age.strip().rstrip("."), _join(a.gender, "")
+    if not age and not gender:
+        return ""
+    if not age.isdigit():  # free words ("late twenties") or no age at all
+        return "{{char}}: " + ", ".join(p for p in (age, gender) if p) + "."
+    if tr:
+        return f"{{{{char}}}} {age} yaşında{' bir ' + gender if gender else ''}."
+    article = "an" if age.startswith("8") or age in ("11", "18") else "a"
+    return f"{{{{char}}}} is {article} {age}-year-old {gender or 'person'}."
+
+
 def build_card(a: WizardAnswers, lang: str) -> Card:
     """Turn wizard answers into a card, written in the interface language."""
     tr = lang == "tr"
     concept = a.concept.strip().rstrip(".")
-    desc = [f"{{{{char}}}}: {concept}." if concept else ""]
+    desc = [_identity(a, tr), f"{{{{char}}}}: {concept}." if concept else ""]
+    if a.appearance.strip():
+        desc.append(("Görünüş: " if tr else "Appearance: ") + _sentence(a.appearance))
+    if a.backstory.strip():
+        desc.append(("Geçmişi: " if tr else "Background: ") + _sentence(a.backstory))
     if a.genre:
         desc.append(
             f"Hikâye {_join(a.genre, lang)} geçiyor."
@@ -269,6 +346,10 @@ def build_card(a: WizardAnswers, lang: str) -> Card:
             if tr
             else f"Speech: {_join(a.speech, lang)}."
         )
+    if a.likes.strip():
+        pers.append(
+            ("Sevdikleri / sevmedikleri: " if tr else "Likes and dislikes: ") + _sentence(a.likes)
+        )
     scen = []
     if a.relationship:
         rel = _join(a.relationship, lang)
@@ -277,30 +358,52 @@ def build_card(a: WizardAnswers, lang: str) -> Card:
             if tr
             else f"{{{{char}}}} and {{{{user}}}}: {rel}."
         )
+    if a.history.strip():
+        scen.append(_sentence(a.history))
     if a.place.strip():
         place = a.place.strip().rstrip(".")
         scen.append(f"Sahne: {place}." if tr else f"Scene: {place}.")
-    return Card(
+    if a.content == "mature":
+        scen.append(
+            "Yetişkinler için bir hikâye; şimdiki zamanda ikisi de yetişkin ve hikâyedeki "
+            "herkes, arka plandakiler dahil, yetişkin (okuyorlarsa üniversitede)."
+            if tr
+            else "An adult story; in the present, both are adults, and so is everyone else "
+            "in it, background people included (if they study, it is at university)."
+        )
+        if a.themes:
+            themes = _join(a.themes, lang)
+            scen.append(
+                f"Hikâyenin işlediği temalar: {themes}."
+                if tr
+                else f"Themes the story explores: {themes}."
+            )
+    card = Card(
         name=a.name.strip(),
         description=" ".join(d for d in desc if d),
         personality="\n".join(pers),
         scenario=" ".join(scen),
         mes_example=f"<START>\n{{{{char}}}}: {a.example.strip()}" if a.example.strip() else "",
-        tags=["custom"],
+        tags=["custom", "mature"] if a.content == "mature" else ["custom"],
     )
+    set_card_content(card, a.content)
+    return card
 
 
 # ── single-field AI helpers ─────────────────────────────────────────────────
 
 LANG_NAMES = {"tr": "Turkish", "en": "English"}
+MAX_EXAMPLES = 2
 
 FIELD_TASKS = {
     "first_mes": (
         "Write {{char}}'s opening message for a one-on-one roleplay chat with {{user}}. "
-        "80–160 words. Set the scene with concrete sensory details (place, light, sound, smell). "
+        '80–160 words, written by {{char}} in the first person (I, me, my); "you" is '
+        "{{user}}. Set the scene with concrete sensory details (place, light, sound, smell). "
         "Physical actions go in *asterisks*; speech is plain text. Show {{char}}'s personality "
-        "through behaviour and voice. Address {{user}} in the second person. End with a line or "
-        "question {{user}} can easily respond to. Never write {{user}}'s words or actions."
+        "through behaviour and voice. Describe only what {{char}} does, says and notices: "
+        "never what {{user}} does, thinks or feels. Keep the language natural even if "
+        "{{char}}'s style is colourful. End at a moment {{user}} can easily respond to."
     ),
     "mes_example": (
         "Write two short example exchanges that show {{char}}'s voice and personality. "
@@ -329,11 +432,18 @@ def field_prompt(card: Card, field: str, lang: str) -> list[ChatMessage]:
         if value.strip()
     )
     task = FIELD_TASKS[field]
+    mature = (
+        " This character is for adult (18+) fiction: a sensual, mature tone is welcome "
+        "where it fits. Everyone is an adult in the present of the story."
+        if card_content(card) == "mature"
+        else ""
+    )
     return [
         ChatMessage(
             "system",
             "You are a skilled fiction writer helping to build a roleplay character. "
-            f"Write in {language}. Output only the requested text: no titles, notes or quotes.",
+            f"Write in {language}. Output only the requested text: no titles, notes or quotes."
+            + mature,
         ),
         ChatMessage("user", f"Character sheet:\n{sheet}\n\nTask: {task}"),
     ]
@@ -346,6 +456,9 @@ def clean_field(field: str, text: str) -> str:
         text = re.sub(r"(?im)^\s*<\s*start\s*>\s*$", "<START>", text)
         if "<START>" not in text:
             text = "<START>\n" + text
+        # Small models often keep going; more examples just give them more to copy.
+        blocks = [b.strip() for b in text.split("<START>") if b.strip()]
+        text = "\n".join(f"<START>\n{b}" for b in blocks[:MAX_EXAMPLES])
     return text
 
 

@@ -4,7 +4,7 @@ import re
 import pytest
 
 from chatclient.config import DEFAULT_CONFIG_TOML, ConfigError, load_config
-from chatclient.i18n import Translator
+from chatclient.i18n import Translator, help_text
 from chatclient.ui.render import StreamWriter
 
 
@@ -29,8 +29,9 @@ def test_config_with_utf8_bom(tmp_path):
 
 
 def test_translator_falls_back_to_english():
-    assert "Commands" in Translator("en")("help")
-    assert "Komutlar" in Translator("tr")("help")
+    en, tr = help_text(Translator("en")), help_text(Translator("tr"))
+    assert en.startswith("Commands") and "/continue" in en and "Ctrl+P" in en
+    assert tr.startswith("Komutlar") and "karakter dışı" in tr
     assert Translator("tr")("missing-key") == "missing-key"
 
 

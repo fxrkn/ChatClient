@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import locale
 import os
+from dataclasses import dataclass
+
+LANG_KEY = "ui_lang"  # language chosen with /lang (overrides config)
 
 STRINGS: dict[str, dict[str, str]] = {
     "welcome": {
@@ -83,12 +86,66 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "[the model declined to answer — try /regen or another model]",
         "tr": "[model yanıt vermeyi reddetti — /regen ya da başka bir model deneyin]",
     },
+    "refusal_fallback": {
+        "en": "{old} declined; {new} is writing this reply instead (the declined one: /prev).",
+        "tr": "{old} reddetti; bu yanıtı {new} yazıyor (reddedilen sürüm: /prev).",
+    },
+    "rewrite_repeat": {
+        "en": "That reply repeated {pct} of earlier ones; writing a fresh one (the repeat: /prev).",
+        "tr": "Bu yanıt öncekilerin {pct} kadarını tekrarladı; yenisi yazılıyor (tekrar eden: /prev).",
+    },
+    "private_on": {
+        "en": "Private session: nothing here is remembered, indexed or recalled elsewhere. "
+        "What memory already took from it was deleted.",
+        "tr": "Gizli oturum: buradaki hiçbir şey hatırlanmaz, indekslenmez, başka yerde "
+        "anılmaz. Hafızanın bu oturumdan aldıkları silindi.",
+    },
+    "private_off": {
+        "en": "Private mode off: memory works in this session again (from now on).",
+        "tr": "Gizli mod kapalı: hafıza bu oturumda yeniden çalışıyor (bundan sonrası için).",
+    },
+    "content_mode": {
+        "en": "Content: {mode}  (/content standard|mature)",
+        "tr": "İçerik: {mode}  (/content standard|mature)",
+    },
+    "fallback_set": {
+        "en": "Declined replies are rewritten by {model}.",
+        "tr": "Reddedilen yanıtları {model} yeniden yazar.",
+    },
+    "fallback_off": {
+        "en": "No fallback for declined replies (set one: /fallback provider:model).",
+        "tr": "Reddedilen yanıtlar için yedek model yok (ayarla: /fallback sağlayıcı:model).",
+    },
     "truncated_len": {
         "en": "[reply hit max_tokens — raise it with /set max_tokens N]",
         "tr": "[yanıt max_tokens sınırına ulaştı — /set max_tokens N ile artırın]",
     },
     "you": {"en": "You", "tr": "Sen"},
     "model_load": {"en": "model load {s}s", "tr": "model yükleme {s}s"},
+    "typing": {"en": "{name} is typing…", "tr": "{name} yazıyor…"},
+    "picker_footer": {
+        "en": "↑↓ move · type to filter · Enter choose · Esc cancel",
+        "tr": "↑↓ gez · yazarak filtrele · Enter seç · Esc vazgeç",
+    },
+    "pick_model": {"en": "Choose a model", "tr": "Model seçin"},
+    "pick_session": {"en": "Switch to session", "tr": "Oturuma geç"},
+    "pick_char": {"en": "Start a chat with", "tr": "Sohbete başla"},
+    "no_models_found": {
+        "en": "No models found. Is a local server running, or is an API key set (/key)?",
+        "tr": "Model bulunamadı. Yerel sunucu açık mı, ya da API anahtarı ekli mi (/key)?",
+    },
+    "alt_hint": {
+        "en": "Alt+←/→ (or Ctrl+←/→) other versions · → on the last writes a new one",
+        "tr": "Alt+←/→ (veya Ctrl+←/→) diğer sürümler · sondayken → yenisini yazar",
+    },
+    "char_color_usage": {
+        "en": "Usage: /char color #rrggbb   (or: /char color auto)",
+        "tr": "Kullanım: /char color #rrggbb   (ya da: /char color auto)",
+    },
+    "char_color_set": {
+        "en": "{name} now uses {color}",
+        "tr": "{name} artık {color} rengini kullanıyor",
+    },
     "key_usage": {
         "en": "Usage: /key set <provider>  (providers: {names})",
         "tr": "Kullanım: /key set <sağlayıcı>  (sağlayıcılar: {names})",
@@ -188,9 +245,62 @@ STRINGS: dict[str, dict[str, str]] = {
         "tr": "Karakterin adı ne? (iptal için Ctrl+C)",
     },
     "q_concept": {
-        "en": "Who is {name}, in one line? (age, job, situation, e.g. '34, runs a tiny bookshop')",
-        "tr": "{name} kim, tek satırda? (yaş, meslek, durum; örn. '34 yaşında, küçük bir sahafı var')",
+        "en": "Who is {name}, in one line? (job, situation)",
+        "tr": "{name} kim, tek satırda? (meslek, durum)",
     },
+    "q_content": {
+        "en": "What kind of character is {name}?",
+        "tr": "{name} nasıl bir karakter?",
+    },
+    "q_age": {
+        "en": "{name}'s age? (a number or your own words; Enter skips)",
+        "tr": "{name} kaç yaşında? (sayı ya da kendi ifadeniz; Enter atlar)",
+    },
+    "q_age_mature": {
+        "en": "{name}'s age? (18 or older)",
+        "tr": "{name} kaç yaşında? (18 ya da üstü)",
+    },
+    "age_adult_needed": {
+        "en": "A mature character needs an age of 18 or older, as a number.",
+        "tr": "Yetişkin içerikli bir karakterin yaşı sayı olarak 18 ya da üstü olmalı.",
+    },
+    "q_gender": {"en": "{name} is a…", "tr": "{name} bir…"},
+    "q_appearance": {
+        "en": "What does {name} look like? (optional: build, hair, clothes, a detail)",
+        "tr": "{name} nasıl görünüyor? (isteğe bağlı: yapı, saç, kıyafet, bir ayrıntı)",
+    },
+    "q_likes": {
+        "en": "What does {name} like and dislike? (optional)",
+        "tr": "{name} neleri sever, nelerden hoşlanmaz? (isteğe bağlı)",
+    },
+    "q_backstory": {
+        "en": "{name}'s background, in a sentence or two? (optional)",
+        "tr": "{name}'in geçmişi, bir iki cümleyle? (isteğe bağlı)",
+    },
+    "q_history": {
+        "en": "What has happened between you and {name} so far? (optional)",
+        "tr": "Sizinle {name} arasında şimdiye kadar neler oldu? (isteğe bağlı)",
+    },
+    "q_themes": {
+        "en": "Which themes should the story explore?",
+        "tr": "Hikâye hangi temaları işlesin?",
+    },
+    "q_save_char": {
+        "en": "Save {name} like this? [Y/n]",
+        "tr": "{name} bu hâliyle kaydedilsin mi? [E/h]",
+    },
+    "char_not_saved": {
+        "en": "Not saved.",
+        "tr": "Kaydedilmedi.",
+    },
+    "content_mode_char": {
+        "en": "Content for {name}: {mode}  (/content standard|mature)",
+        "tr": "{name} için içerik: {mode}  (/content standard|mature)",
+    },
+    "theme_sample_name": {"en": "Name", "tr": "İsim"},
+    "theme_sample_text": {"en": "narration,", "tr": "anlatım,"},
+    "theme_sample_action": {"en": "action", "tr": "eylem"},
+    "theme_sample_speech": {"en": '"speech"', "tr": '"konuşma"'},
     "q_temperament": {"en": "{name}'s temperament?", "tr": "{name}'in mizacı?"},
     "q_speech": {"en": "How does {name} talk?", "tr": "{name} nasıl konuşur?"},
     "q_values": {"en": "What does {name} value most?", "tr": "{name} en çok neye değer verir?"},
@@ -230,6 +340,22 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "file_not_found": {"en": "File not found: {path}", "tr": "Dosya bulunamadı: {path}"},
     "import_failed": {"en": "Could not import: {error}", "tr": "İçe aktarılamadı: {error}"},
+    "imported_character": {
+        "en": "Imported {name}: {chats} chats, {memories} memories. /char {name} to start.",
+        "tr": "{name} içe aktarıldı: {chats} sohbet, {memories} anı. Başlamak için /char {name}.",
+    },
+    "imported_persona": {
+        "en": "Imported the persona {name}.",
+        "tr": "{name} personası içe aktarıldı.",
+    },
+    "imported_chat": {
+        "en": "Imported the chat “{name}” (/sessions).",
+        "tr": "“{name}” sohbeti içe aktarıldı (/sessions).",
+    },
+    "imported_copy": {
+        "en": " It was already here, so this is a copy.",
+        "tr": " Zaten vardı, bu yüzden bir kopya oluşturuldu.",
+    },
     "char_imported": {
         "en": "Imported {name} (#{id}). /char use {name} to start.",
         "tr": "{name} içe aktarıldı (#{id}). Başlamak için /char use {name}.",
@@ -292,69 +418,261 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "No tested free models yet — run /free.",
         "tr": "Henüz test edilmiş ücretsiz model yok — /free çalıştırın.",
     },
-    "help": {
-        "en": """Commands
-  /new [title]           start a new session
-  /sessions              list sessions
-  /switch <id>           switch to a session
-  /rename <title>        rename the current session
-  /delete <id>           delete a session
-  /history [n]           show the last n messages (default 20)
-  /model [prov:model]    show or change the model for this session
-  /models [provider]     list available models
-  /providers             list configured providers
-  /system [text|reset]   show or set this session's system prompt
-  /set [name value]      show or set generation parameters (value 'reset' clears)
-  /regen                 generate a new reply to your last message
-  /undo                  remove the last exchange
-  /search [--all] text   search messages (this session, or all with --all)
-  /char list | new | use <name> | show | edit | delete <name>
-                         characters: list, create (wizard), start a chat, view, edit, delete
-  /char ai [first_mes|mes_example|description]
-                         let the AI rewrite one field of the current character
-  /char import <file>    import a community card (.json or .png)
-  /char export [name]    save a character as a .json card
-  /persona [set|clear]   tell characters who you are
-  /free [list|all|N]     test free OpenRouter models and switch to the fastest
-  /key [set|remove] [provider]
-                         show, add or remove API keys (stored securely)
-  /theme [name|reset]    show or switch the colour theme
-  /clear                 clear the screen (history is kept)
-  /config                show config and data file locations
-  /quit                  exit
-Keys: Enter send · Alt+Enter new line · Ctrl+C stop a reply · Ctrl+D quit""",
-        "tr": """Komutlar
-  /new [başlık]          yeni oturum başlat
-  /sessions              oturumları listele
-  /switch <id>           oturuma geç
-  /rename <başlık>       mevcut oturumu yeniden adlandır
-  /delete <id>           oturumu sil
-  /history [n]           son n mesajı göster (varsayılan 20)
-  /model [sağl:model]    bu oturumun modelini göster/değiştir
-  /models [sağlayıcı]    kullanılabilir modelleri listele
-  /providers             tanımlı sağlayıcıları listele
-  /system [metin|reset]  bu oturumun sistem istemini göster/ayarla
-  /set [ad değer]        üretim parametrelerini göster/ayarla ('reset' temizler)
-  /regen                 son mesajınıza yeni bir yanıt üret
-  /undo                  son karşılıklı mesajları geri al
-  /search [--all] metin  mesajlarda ara (bu oturumda, --all ile hepsinde)
-  /char list | new | use <ad> | show | edit | delete <ad>
-                         karakterler: listele, oluştur (sihirbaz), sohbete başla, gör, düzenle, sil
-  /char ai [first_mes|mes_example|description]
-                         mevcut karakterin bir alanını yapay zekâya yazdır
-  /char import <dosya>   topluluk kartı içe aktar (.json veya .png)
-  /char export [ad]      karakteri .json kart olarak kaydet
-  /persona [set|clear]   karakterlere kim olduğunuzu anlatın
-  /free [list|all|N]     ücretsiz OpenRouter modellerini test et, en hızlısına geç
-  /key [set|remove] [sağlayıcı]
-                         API anahtarlarını göster, ekle ya da sil (güvenli saklanır)
-  /theme [ad|reset]      renk temasını göster/değiştir
-  /clear                 ekranı temizle (geçmiş silinmez)
-  /config                ayar ve veri dosyalarının konumunu göster
-  /quit                  çıkış
-Tuşlar: Enter gönder · Alt+Enter yeni satır · Ctrl+C yanıtı durdur · Ctrl+D çıkış""",
+    "edit_q": {
+        "en": "Edit your message (Enter sends, Alt+Enter new line, Ctrl+C cancels):",
+        "tr": "Mesajınızı düzenleyin (Enter gönderir, Alt+Enter yeni satır, Ctrl+C iptal):",
+    },
+    "edit_reply_q": {
+        "en": "Edit the reply (Enter saves, Alt+Enter new line, Ctrl+C cancels):",
+        "tr": "Yanıtı düzenleyin (Enter kaydeder, Alt+Enter yeni satır, Ctrl+C iptal):",
+    },
+    "edit_no_message": {
+        "en": "There is no message of yours to edit.",
+        "tr": "Düzenlenecek mesajınız yok.",
+    },
+    "edit_no_reply": {"en": "There is no reply yet.", "tr": "Henüz bir yanıt yok."},
+    "edit_reply_saved": {
+        "en": "Saved your edit as a new version (Alt+← shows the original).",
+        "tr": "Düzenlemeniz yeni bir sürüm olarak kaydedildi (Alt+← orijinali gösterir).",
+    },
+    "ooc_usage": {
+        "en": "Usage: /ooc <message>   e.g. /ooc slow the story down a bit",
+        "tr": "Kullanım: /ooc <mesaj>   örn. /ooc hikâyeyi biraz yavaşlat",
+    },
+    "copied": {"en": "Copied to the clipboard.", "tr": "Panoya kopyalandı."},
+    "copied_terminal": {
+        "en": "Sent to the clipboard via the terminal (if nothing was copied, your terminal doesn't support it).",
+        "tr": "Terminal üzerinden panoya gönderildi (kopyalanmadıysa terminaliniz bunu desteklemiyor).",
+    },
+    "export_empty": {"en": "Nothing to export yet.", "tr": "Henüz dışa aktarılacak bir şey yok."},
+    "export_usage": {"en": "Usage: /export [{formats}]", "tr": "Kullanım: /export [{formats}]"},
+    "exported": {"en": "Saved → {path}", "tr": "Kaydedildi → {path}"},
+    "lang_usage": {"en": "Usage: /lang en | tr | auto", "tr": "Kullanım: /lang en | tr | auto"},
+    "lang_set": {"en": "Interface language: English", "tr": "Arayüz dili: Türkçe"},
+    "palette_title": {"en": "Commands", "tr": "Komutlar"},
+    "draft_restored": {
+        "en": "Your unsent message was restored.",
+        "tr": "Gönderilmemiş mesajınız geri yüklendi.",
+    },
+    "setup_title": {"en": "Welcome to ChatClient!", "tr": "ChatClient'a hoş geldiniz!"},
+    "setup_intro": {
+        "en": "Let's get you chatting in a minute. You can rerun this anytime with /setup.",
+        "tr": "Bir dakikada sohbete başlayalım. Bunu istediğiniz zaman /setup ile tekrar açabilirsiniz.",
+    },
+    "setup_how": {"en": "Where should the AI run?", "tr": "Yapay zekâ nerede çalışsın?"},
+    "setup_local": {"en": "On this computer", "tr": "Bu bilgisayarda"},
+    "setup_local_hint": {
+        "en": "free, private, works offline (needs Ollama or LM Studio)",
+        "tr": "ücretsiz, gizli, çevrimdışı çalışır (Ollama ya da LM Studio gerekir)",
+    },
+    "setup_cloud": {"en": "Online, free models", "tr": "İnternetten, ücretsiz modeller"},
+    "setup_cloud_hint": {
+        "en": "no install; needs a free OpenRouter account",
+        "tr": "kurulum yok; ücretsiz bir OpenRouter hesabı gerekir",
+    },
+    "setup_skip": {"en": "Skip for now", "tr": "Şimdilik geç"},
+    "setup_looking": {
+        "en": "Looking for a local AI server…",
+        "tr": "Yerel yapay zekâ sunucusu aranıyor…",
+    },
+    "setup_no_local": {
+        "en": "No local server with a model was found.",
+        "tr": "Model yüklü bir yerel sunucu bulunamadı.",
+    },
+    "setup_install_ollama": {
+        "en": "Install Ollama from https://ollama.com/download, then run:  ollama pull {model}",
+        "tr": "Ollama'yı https://ollama.com/download adresinden kurun, sonra şunu çalıştırın:  ollama pull {model}",
+    },
+    "setup_retry_q": {"en": "Look again? [Y/n]", "tr": "Tekrar bakılsın mı? [E/h]"},
+    "setup_key_info": {
+        "en": "Create a free key at https://openrouter.ai/keys and paste it below.",
+        "tr": "https://openrouter.ai/keys adresinden ücretsiz bir anahtar oluşturup aşağıya yapıştırın.",
+    },
+    "setup_your_name": {
+        "en": "What should characters call you? (optional)",
+        "tr": "Karakterler size ne diye hitap etsin? (isteğe bağlı)",
+    },
+    "setup_pick_char_q": {
+        "en": "Start a chat with a character now? [Y/n]",
+        "tr": "Şimdi bir karakterle sohbete başlansın mı? [E/h]",
+    },
+    "setup_create_char_q": {
+        "en": "Create your first character now? [Y/n]",
+        "tr": "İlk karakterinizi şimdi oluşturalım mı? [E/h]",
+    },
+    "setup_done": {
+        "en": "All set. Type a message, or press Ctrl+P to see what you can do.",
+        "tr": "Hazır. Bir mesaj yazın ya da neler yapabileceğinizi görmek için Ctrl+P'ye basın.",
+    },
+    "recalled_n": {"en": "remembered {n}", "tr": "{n} anı"},
+    "conflict_noted": {"en": "⚠ {n} contradiction noted", "tr": "⚠ {n} çelişki fark edildi"},
+    "conflicts_none": {"en": "No contradictions found.", "tr": "Çelişki bulunmadı."},
+    "memory_outdated": {"en": "outdated", "tr": "eskidi"},
+    "semantic_status": {
+        "en": "Meaning-based recall: {state} {detail}",
+        "tr": "Anlam tabanlı hatırlama: {state} {detail}",
+    },
+    "semantic_off": {"en": "off", "tr": "kapalı"},
+    "semantic_waiting": {"en": "starting soon", "tr": "birazdan başlayacak"},
+    "semantic_loading": {
+        "en": "loading the model (first time: downloading ~0.2 GB)",
+        "tr": "model yükleniyor (ilk sefer: ~0,2 GB indiriliyor)",
+    },
+    "semantic_ready": {"en": "ready", "tr": "hazır"},
+    "semantic_failed": {"en": "unavailable (see the log)", "tr": "kullanılamıyor (günlüğe bakın)"},
+    "semantic_waiting_n": {"en": "{n} waiting", "tr": "{n} bekliyor"},
+    "memory_off": {
+        "en": "Memory is turned off ([memory] enabled = false in the config).",
+        "tr": "Hafıza kapalı (ayar dosyasında [memory] enabled = false).",
+    },
+    "memory_none": {"en": "Nothing remembered yet.", "tr": "Henüz hatırlanan bir şey yok."},
+    "memory_hint": {
+        "en": "/memory pin|unpin|delete <#> · /memory add <text> · /memory <search> · /memory status",
+        "tr": "/memory pin|unpin|delete <#> · /memory add <metin> · /memory <arama> · /memory status",
+    },
+    "memory_add_usage": {
+        "en": "Usage: /memory add <something to remember>",
+        "tr": "Kullanım: /memory add <hatırlanacak şey>",
+    },
+    "memory_added": {"en": "Remembered (#{id}).", "tr": "Hatırlanacak (#{id})."},
+    "memory_id_usage": {
+        "en": "Usage: /memory {cmd} <number>",
+        "tr": "Kullanım: /memory {cmd} <numara>",
+    },
+    "memory_not_found": {"en": "No memory #{id}.", "tr": "#{id} numaralı anı yok."},
+    "memory_pinned": {
+        "en": "Pinned #{id}: always kept in mind.",
+        "tr": "#{id} sabitlendi: hep akılda tutulacak.",
+    },
+    "memory_unpinned": {"en": "Unpinned #{id}.", "tr": "#{id} sabitlemesi kaldırıldı."},
+    "memory_deleted": {"en": "Forgot #{id}.", "tr": "#{id} unutuldu."},
+    "memory_running": {"en": "Updating memory now…", "tr": "Hafıza şimdi güncelleniyor…"},
+    "memory_ran": {"en": "Done ({n} job(s)).", "tr": "Tamamlandı ({n} iş)."},
+    "memory_last_error": {"en": "Last memory error: {error}", "tr": "Son hafıza hatası: {error}"},
+    "memory_status": {
+        "en": "{memories} memories ({scope}) · {segments} summaries · {days} day digests · {pending} jobs waiting · {failed} failed",
+        "tr": "{memories} anı ({scope}) · {segments} özet · {days} gün özeti · {pending} bekleyen iş · {failed} başarısız",
+    },
+    "scope_character": {
+        "en": "shared across this character's chats",
+        "tr": "bu karakterin tüm sohbetlerinde ortak",
+    },
+    "scope_session": {"en": "this chat only", "tr": "yalnızca bu sohbet"},
+    "recall_usage": {
+        "en": "Usage: /recall <what to look for>   e.g. /recall what did we do yesterday",
+        "tr": "Kullanım: /recall <ne aranacak>   örn. /recall dün ne yaptık",
+    },
+    "recall_date": {"en": "dates: {range}", "tr": "tarihler: {range}"},
+    "recall_no_brief": {
+        "en": "(no brief: the utility model is off or unavailable; showing search results)",
+        "tr": "(brif yok: yardımcı model kapalı ya da ulaşılamıyor; arama sonuçları gösteriliyor)",
+    },
+    "scene_none": {
+        "en": "No scene recorded yet (it updates as you chat).",
+        "tr": "Henüz sahne kaydı yok (sohbet ettikçe güncellenir).",
+    },
+    "scene_cleared": {"en": "Scene cleared.", "tr": "Sahne temizlendi."},
+    "summary_none": {
+        "en": "No summaries yet (they appear as the chat grows).",
+        "tr": "Henüz özet yok (sohbet uzadıkça oluşur).",
+    },
+    "summary_story": {"en": "Story so far", "tr": "Hikâye şimdiye kadar"},
+    "day_usage": {
+        "en": "Usage: /day yesterday | /day 12 October | /day last week",
+        "tr": "Kullanım: /day dün | /day 12 Ekim | /day geçen hafta",
+    },
+    "day_none": {"en": "No day summary for {days} yet.", "tr": "{days} için henüz gün özeti yok."},
+    "help_title": {"en": "Commands", "tr": "Komutlar"},
+    "help_keys": {
+        "en": "Keys: Enter send · Alt+Enter new line · Ctrl+P command palette · Alt+←/→ reply versions · Ctrl+C stop a reply · Ctrl+D quit",
+        "tr": "Tuşlar: Enter gönder · Alt+Enter yeni satır · Ctrl+P komut paleti · Alt+←/→ yanıt sürümleri · Ctrl+C yanıtı durdur · Ctrl+D çıkış",
     },
 }
+
+
+@dataclass(frozen=True)
+class CommandDoc:
+    command: str  # what the palette inserts / runs
+    args: str  # usage hint after the command ("" = runs directly from the palette)
+    en: str
+    tr: str
+    args_tr: str = ""  # Turkish usage hint, if it differs
+
+    def usage(self, lang: str) -> str:
+        args = self.args_tr if lang == "tr" and self.args_tr else self.args
+        return f"{self.command} {args}".strip()
+
+    def describe(self, lang: str) -> str:
+        return self.tr if lang == "tr" else self.en
+
+
+# Single source for /help and the Ctrl+P palette.
+COMMAND_DOCS: tuple[CommandDoc, ...] = (
+    CommandDoc("/new", "[title]", "start a new session", "yeni oturum başlat", "[başlık]"),
+    CommandDoc("/sessions", "", "list sessions", "oturumları listele"),
+    CommandDoc("/switch", "", "switch session (pick from a list, or /switch <id>)", "oturuma geç (listeden seç ya da /switch <id>)"),
+    CommandDoc("/rename", "<title>", "rename this session", "bu oturumu yeniden adlandır", "<başlık>"),
+    CommandDoc("/delete", "<id>", "delete a session", "oturum sil"),
+    CommandDoc("/history", "[n]", "show the last n messages", "son n mesajı göster"),
+    CommandDoc("/edit", "", "edit your last message and resend it (/edit reply: fix the AI's)", "son mesajınızı düzenleyip yeniden gönderin (/edit reply: AI yanıtını düzeltin)"),
+    CommandDoc("/continue", "", "let the AI carry on from where its reply stopped", "yanıtı kaldığı yerden sürdürt"),
+    CommandDoc("/regen", "", "write a new version of the last reply (/regen <model>: with another model)", "son yanıtın yeni bir sürümünü yazdır (/regen <model>: başka modelle)"),
+    CommandDoc("/prev", "", "previous version of the last reply (Alt+←)", "son yanıtın önceki sürümü (Alt+←)"),
+    CommandDoc("/next", "", "next version of the last reply (Alt+→)", "son yanıtın sonraki sürümü (Alt+→)"),
+    CommandDoc("/undo", "", "remove the last exchange", "son karşılıklı mesajları geri al"),
+    CommandDoc("/ooc", "<message>", "talk to the AI out of character", "karakter dışı (OOC) konuş", "<mesaj>"),
+    CommandDoc("/copy", "", "copy the last reply (/copy all: the whole chat)", "son yanıtı kopyala (/copy all: tüm sohbet)"),
+    CommandDoc("/export", "", "save the chat as md, html, txt or jsonl (jsonl: re-importable)", "sohbeti md, html, txt ya da jsonl olarak kaydet (jsonl: geri yüklenebilir)"),
+    CommandDoc("/import", "<file>", "import a character (.zip/.json/.png), a persona or a chat (.jsonl)", "karakter (.zip/.json/.png), persona ya da sohbet (.jsonl) içe aktar", "<dosya>"),
+    CommandDoc("/open", "", "open a folder: a character's, or data, characters, personas, chats, exports", "klasör aç: karakterinki ya da data, characters, personas, chats, exports"),
+    CommandDoc("/search", "<text>", "search messages (/search --all: every session)", "mesajlarda ara (/search --all: tüm oturumlar)", "<metin>"),
+    CommandDoc("/model", "", "change the model (pick from a list, or /model provider:model)", "modeli değiştir (listeden seç ya da /model sağlayıcı:model)"),
+    CommandDoc("/models", "", "list available models", "kullanılabilir modelleri listele"),
+    CommandDoc("/free", "", "find a working free OpenRouter model", "çalışan ücretsiz bir OpenRouter modeli bul"),
+    CommandDoc("/providers", "", "list configured providers", "tanımlı sağlayıcıları listele"),
+    CommandDoc("/key", "", "show, add or remove API keys (/key set <provider>)", "API anahtarlarını göster, ekle, sil (/key set <sağlayıcı>)"),
+    CommandDoc("/char list", "", "list characters", "karakterleri listele"),
+    CommandDoc("/char new", "", "create a character (wizard)", "karakter oluştur (sihirbaz)"),
+    CommandDoc("/char use", "", "start a chat with a character", "bir karakterle sohbete başla"),
+    CommandDoc("/char show", "", "show the current character's card", "mevcut karakterin kartını göster"),
+    CommandDoc("/char edit", "", "edit the current character", "mevcut karakteri düzenle"),
+    CommandDoc("/char color", "<#rrggbb|auto>", "set the character's name colour", "karakterin isim rengini ayarla"),
+    CommandDoc("/char ai", "<field>", "let the AI rewrite a field (first_mes, mes_example, description)", "bir alanı AI'a yazdır (first_mes, mes_example, description)", "<alan>"),
+    CommandDoc("/char import", "<file>", "import a character (.zip with chats & memory, or a .json/.png card)", "karakter içe aktar (sohbet ve hafızalı .zip ya da .json/.png kart)", "<dosya>"),
+    CommandDoc("/char export", "", "save a character as .zip with chats & memory (/char export <name> card: the card only)", "karakteri sohbet ve hafızasıyla .zip olarak kaydet (/char export <ad> card: yalnızca kart)"),
+    CommandDoc("/char delete", "<name>", "delete a character", "karakter sil", "<ad>"),
+    CommandDoc("/memory", "", "what the AI remembers: list, search, pin, delete, add", "AI'ın hatırladıkları: listele, ara, sabitle, sil, ekle"),
+    CommandDoc("/recall", "<text>", "test what would be remembered, e.g. /recall yesterday", "neyin hatırlanacağını dene, örn. /recall dün", "<metin>"),
+    CommandDoc("/day", "", "what happened on a day (/day yesterday, /day 12 October)", "bir günde ne oldu (/day dün, /day 12 Ekim)"),
+    CommandDoc("/summary", "", "the story so far", "hikâye şimdiye kadar"),
+    CommandDoc("/scene", "", "current scene: place, time, mood, relationship", "mevcut sahne: yer, zaman, ruh hâli, ilişki"),
+    CommandDoc("/persona", "", "tell characters who you are (/persona set · export · import <file>)", "karakterlere kim olduğunuzu anlatın (/persona set · export · import <dosya>)"),
+    CommandDoc("/system", "", "show or set this session's system prompt", "bu oturumun sistem istemini göster/ayarla"),
+    CommandDoc("/set", "", "show or set generation parameters (/set temperature 0.9)", "üretim parametrelerini göster/ayarla (/set temperature 0.9)"),
+    CommandDoc("/theme", "", "show or switch the colour theme", "renk temasını göster/değiştir"),
+    CommandDoc("/private", "[on|off]", "private session: no memory, no indexing", "gizli oturum: hafıza ve indeksleme yok"),
+    CommandDoc("/content", "[standard|mature]", "content setting (mature: adult fiction, no lectures)", "içerik ayarı (mature: yetişkin kurgu, ahlak dersi yok)"),
+    CommandDoc("/fallback", "[provider:model|off]", "model that rewrites declined replies", "reddedilen yanıtları yeniden yazan model"),
+    CommandDoc("/lang", "<en|tr|auto>", "interface language", "arayüz dili"),
+    CommandDoc("/setup", "", "run the first-time setup again", "ilk kurulum sihirbazını yeniden çalıştır"),
+    CommandDoc("/clear", "", "clear the screen (history is kept)", "ekranı temizle (geçmiş silinmez)"),
+    CommandDoc("/config", "", "show where config and data files are", "ayar ve veri dosyalarının yerini göster"),
+    CommandDoc("/help", "", "show this help", "bu yardımı göster"),
+    CommandDoc("/quit", "", "exit", "çıkış"),
+)  # fmt: skip
+
+
+def help_text(t: Translator, width: int = 24) -> str:
+    lines = [t("help_title")]
+    for doc in COMMAND_DOCS:
+        usage = doc.usage(t.lang)
+        if len(usage) < width - 2:
+            lines.append(f"  {usage:<{width - 2}} {doc.describe(t.lang)}")
+        else:
+            lines.append(f"  {usage}")
+            lines.append(f"  {'':<{width - 2}} {doc.describe(t.lang)}")
+    lines.append(t("help_keys"))
+    return "\n".join(lines)
 
 
 def detect_language() -> str:
@@ -379,6 +697,9 @@ def detect_language() -> str:
 
 class Translator:
     def __init__(self, language: str = "auto"):
+        self.set_language(language)
+
+    def set_language(self, language: str) -> None:
         self.lang = detect_language() if language == "auto" else language
 
     def __call__(self, key: str, **kwargs: object) -> str:

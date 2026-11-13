@@ -26,6 +26,7 @@ class Theme:
     error: str
     bar_bg: str  # bottom toolbar background
     bar_fg: str  # bottom toolbar text
+    speech: str  # "quoted speech" in replies, a touch brighter than narration
 
 
 COLOR_KEYS = tuple(f.name for f in fields(Theme) if f.name != "name")
@@ -33,23 +34,52 @@ COLOR_KEYS = tuple(f.name for f in fields(Theme) if f.name != "name")
 PRESETS: dict[str, Theme] = {
     # Low-contrast warm greys with a soft blue accent: easy on the eyes for long sessions.
     "soft": Theme("soft", "#d6d3d1", "#93c5fd", "#a7c4a0", "#a8a29e", "#78716c",
-                  "#e6c07b", "#e57373", "#262626", "#a8a29e"),
+                  "#e6c07b", "#e57373", "#262626", "#a8a29e", "#f0e6d6"),
     # Sepia / Gruvbox-like: warm, paper-ish; good at night.
     "warm": Theme("warm", "#ebdbb2", "#d8a657", "#a9b665", "#a89984", "#7c6f64",
-                  "#e78a4e", "#ea6962", "#32302f", "#a89984"),
+                  "#e78a4e", "#ea6962", "#32302f", "#a89984", "#fbf1c7"),
     # Cool arctic blues (Nord-like).
     "nord": Theme("nord", "#d8dee9", "#88c0d0", "#a3be8c", "#81a1c1", "#616e88",
-                  "#ebcb8b", "#bf616a", "#2e3440", "#81a1c1"),
+                  "#ebcb8b", "#bf616a", "#2e3440", "#81a1c1", "#eceff4"),
     # Muted rose and lavender (Rosé Pine-like).
     "rose": Theme("rose", "#e0def4", "#ebbcba", "#9ccfd8", "#908caa", "#6e6a86",
-                  "#f6c177", "#eb6f92", "#1f1d2e", "#908caa"),
+                  "#f6c177", "#eb6f92", "#1f1d2e", "#908caa", "#f2e9e1"),
     # For light terminal backgrounds.
     "light": Theme("light", "#3f3f46", "#2563eb", "#15803d", "#71717a", "#a1a1aa",
-                   "#b45309", "#b91c1c", "#e4e4e7", "#52525b"),
+                   "#b45309", "#b91c1c", "#e4e4e7", "#52525b", "#18181b"),
     # The terminal's own colours, nothing imposed.
     "classic": Theme("classic", "default", "default", "default", "default", "default",
-                     "default", "default", "default", "default"),
+                     "default", "default", "default", "default", "default"),
 }  # fmt: skip
+
+# Automatic per-character name colours: soft pastels for dark themes, deeper tones for light.
+CHARACTER_PALETTE_DARK = (
+    "#93c5fd", "#f9a8d4", "#86efac", "#fcd34d", "#c4b5fd", "#fdba74", "#67e8f9", "#fca5a5",
+)  # fmt: skip
+CHARACTER_PALETTE_LIGHT = (
+    "#1d4ed8", "#be185d", "#15803d", "#a16207", "#6d28d9", "#c2410c", "#0e7490", "#b91c1c",
+)  # fmt: skip
+
+
+def is_light(theme: Theme) -> bool:
+    """A theme with dark text is meant for a light background."""
+    if theme.text == "default":
+        return False
+    r, g, b = _rgb(theme.text)
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+
+
+def character_color(name: str, theme: Theme, override: str | None = None) -> str:
+    """The colour for a character's name: the card's own colour, else a stable pick
+    from the palette (same name → same colour), else the accent on the classic theme."""
+    if override and valid_color(override):
+        return override
+    if theme.accent == "default":
+        return theme.accent
+    palette = CHARACTER_PALETTE_LIGHT if is_light(theme) else CHARACTER_PALETTE_DARK
+    digest = sum((i + 1) * ord(c) for i, c in enumerate(name.casefold()))
+    return palette[digest % len(palette)]
+
 
 DEFAULT_THEME = "soft"
 

@@ -43,8 +43,9 @@ class StreamWriter:
 
     Optional styling: ``indent`` prefixes every line, ``base`` is the text colour
     escape, and with ``style_actions`` roleplay ``*actions*`` are drawn in italics
-    with the ``action`` colour and the asterisks are hidden. Escape codes never
-    count toward the line width.
+    with the ``action`` colour and the asterisks are hidden. With ``speech`` set,
+    "quoted speech" (straight or curly quotes) gets that colour; the quotes stay.
+    Escape codes never count toward the line width.
     """
 
     def __init__(
@@ -57,6 +58,7 @@ class StreamWriter:
         base: str = "",
         action: str = "",
         style_actions: bool = False,
+        speech: str = "",
     ):
         self.out = out or sys.stdout
         self.width = max(20, (width or shutil.get_terminal_size((100, 24)).columns) - margin)
@@ -64,12 +66,21 @@ class StreamWriter:
         self.base = base
         self.action = action
         self.style_actions = style_actions
+        self.speech = speech
         self.col = 0
         self.word = ""  # visible characters of the pending word
         self.raw = ""  # the pending word including escape codes
         self.wrote_any = False
         self.in_action = False
+        self.in_speech = False
         self.out.write(base)
+
+    def _plain_color(self) -> str:
+        return self.speech if self.in_speech else self.base
+
+    def _visible_char(self, ch: str) -> None:
+        self.word += ch
+        self.raw += ch
 
     def start_at(self, col: int) -> None:
         self.col = col
@@ -100,10 +111,21 @@ class StreamWriter:
                 self.col += 1
             elif ch == "*" and self.style_actions:
                 self.in_action = not self.in_action
-                self.raw += (ITALIC + self.action) if self.in_action else (NO_ITALIC + self.base)
+                self.raw += (
+                    (ITALIC + self.action) if self.in_action else (NO_ITALIC + self._plain_color())
+                )
+            elif ch in '"“”' and self.speech and not self.in_action:
+                opening = ch == "“" or (ch == '"' and not self.in_speech)
+                if opening:
+                    self.in_speech = True
+                    self.raw += self.speech
+                    self._visible_char(ch)
+                else:
+                    self._visible_char(ch)
+                    self.in_speech = False
+                    self.raw += self.base
             else:
-                self.word += ch
-                self.raw += ch
+                self._visible_char(ch)
                 if len(self.word) >= self.width - len(self.indent):  # one huge token
                     self._flush_word()
         self.out.flush()

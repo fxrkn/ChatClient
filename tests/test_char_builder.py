@@ -73,10 +73,10 @@ def test_clean_mes_example_normalises_markers():
 
 
 def test_field_prompt_is_small_and_in_language():
-    card = Card(name="Rowan", description="An innkeeper.", personality="Gentle.")
+    card = Card(name="Alpha", description="An innkeeper.", personality="Gentle.")
     msgs = field_prompt(card, "first_mes", "tr")
     assert "Write in Turkish" in msgs[0].content
-    assert "Name: Rowan" in msgs[1].content and "Task:" in msgs[1].content
+    assert "Name: Alpha" in msgs[1].content and "Task:" in msgs[1].content
     assert sum(len(m.content) for m in msgs) < 2000  # fits easily in a small model
 
 
@@ -131,11 +131,11 @@ def test_import_rejects_png_without_card(tmp_path):
 
 
 def test_json_export_import_roundtrip(tmp_path):
-    card = Card(name="Juno", description="Mechanic.", tags=["sci-fi"], extra={"creator": "me"})
-    path = write_card_file(card, tmp_path / "out" / f"{safe_filename('Juno / v2')}.json")
-    assert path.name == "Juno__v2.json"
+    card = Card(name="Gamma", description="Mechanic.", tags=["sci-fi"], extra={"creator": "me"})
+    path = write_card_file(card, tmp_path / "out" / f"{safe_filename('Gamma / v2')}.json")
+    assert path.name == "Gamma__v2.json"
     back = read_card_file(path)
-    assert (back.name, back.description, back.tags) == ("Juno", "Mechanic.", ["sci-fi"])
+    assert (back.name, back.description, back.tags) == ("Gamma", "Mechanic.", ["sci-fi"])
     assert back.extra["creator"] == "me"
 
 
@@ -143,3 +143,61 @@ def test_import_json_with_bom(tmp_path):
     path = tmp_path / "bom.json"
     path.write_bytes("﻿".encode() + json.dumps({"name": "Bom"}).encode())
     assert read_card_file(path).name == "Bom"
+
+
+def test_mature_card_states_age_and_content():
+    from chatclient.characters import card_content
+
+    a = WizardAnswers(
+        name="Aras",
+        content="mature",
+        age="31",
+        gender=["man"],
+        concept="runs a cocktail bar",
+        appearance="tall, dark stubble",
+        likes="jazz; hates small talk",
+        backstory="divorced two years ago",
+        relationship=["old friends who go back years"],
+        history="they kissed once, last summer",
+        themes=["romance and passion", "explicit, detailed sex"],
+    )
+    card = build_card(a, "en")
+    assert card.description.startswith(
+        "{{char}} is a 31-year-old man. {{char}}: runs a cocktail bar."
+    )
+    assert "Appearance: tall, dark stubble." in card.description
+    assert "Background: divorced two years ago." in card.description
+    assert "Likes and dislikes: jazz; hates small talk." in card.personality
+    assert "old friends who go back years. they kissed once, last summer." in card.scenario
+    assert "both are adults" in card.scenario and "Themes the story explores" in card.scenario
+    assert card_content(card) == "mature" and "mature" in card.tags
+    assert card_content(Card.from_json(card.to_json())) == "mature"  # survives export/import
+
+
+def test_identity_line_variants():
+    assert build_card(WizardAnswers(name="X", age="18", gender=["woman"]), "en").description == (
+        "{{char}} is an 18-year-old woman."
+    )
+    assert build_card(WizardAnswers(name="X", age="late twenties"), "en").description == (
+        "{{char}}: late twenties."
+    )
+    assert build_card(WizardAnswers(name="X", age="28", gender=["erkek"]), "tr").description == (
+        "{{char}} 28 yaşında bir erkek."
+    )
+
+
+def test_age_rules():
+    from chatclient.char_builder import age_ok, parse_age
+
+    assert parse_age("28 yaşında") == 28 and parse_age("about thirty") is None
+    assert age_ok("", "standard") and age_ok("young", "standard")
+    assert age_ok("28", "mature") and not age_ok("16", "mature") and not age_ok("", "mature")
+
+
+def test_mature_card_sets_the_tone_of_ai_fields():
+    from chatclient.characters import set_card_content
+
+    card = Card(name="X", description="d")
+    assert "adult (18+)" not in field_prompt(card, "first_mes", "en")[0].content
+    set_card_content(card, "mature")
+    assert "adult (18+)" in field_prompt(card, "first_mes", "en")[0].content

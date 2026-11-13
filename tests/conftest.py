@@ -9,21 +9,22 @@ from chatclient.providers.echo import EchoProvider
 from chatclient.providers.registry import ProviderRegistry
 from chatclient.storage import Store
 
-ROWAN = Card(
-    name="Rowan",
-    description="{{char}} keeps the Lantern & Thorn, a stone inn at a lonely crossroads.",
-    personality="Gentle giant: slow to speak, quick to notice.",
-    scenario="Late autumn, after dark. {{user}} arrives alone.",
-    first_mes="*The cracked bell clangs.* Shut that door before the wood comes in, friend.",
-    mes_example="<START>\n{{user}}: How much for a room?\n{{char}}: Two coppers.",
-    tags=["fantasy"],
+# Neutral, test-only cards (the app itself ships no characters).
+ALPHA = Card(
+    name="Alpha",
+    description="{{char}} is a test character.",
+    personality="Calm test personality.",
+    scenario="A test scene with {{user}}.",
+    first_mes="*Test action.* Test greeting line.",
+    mes_example="<START>\n{{user}}: test question\n{{char}}: test answer",
+    tags=["test"],
 )
-ELIF = Card(
-    name="Elif",
-    description="{{char}} Kadıköy'de küçük bir sahaf işletiyor.",
-    personality="Sıcak ama mesafeli.",
-    first_mes="*Başını kaldırıyor.* Hoş geldin.",
-    tags=["türkçe"],
+BETA = Card(
+    name="Beta",
+    description="{{char}} ikinci bir test karakteri.",
+    personality="Test kişiliği.",
+    first_mes="*Test eylemi.* Test selamı.",
+    tags=["test"],
 )
 
 
@@ -69,6 +70,6 @@ def chat(config, store, monkeypatch):
 @pytest.fixture
 def shipped(monkeypatch):
     """Pretend the app ships these characters (none are bundled for real)."""
-    cards = {"rowan": ROWAN, "elif": ELIF}
+    cards = {"alpha": ALPHA, "beta": BETA}
     monkeypatch.setattr("chatclient.core.chat.builtin_cards", lambda: dict(cards))
     return cards

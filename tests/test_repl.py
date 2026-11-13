@@ -48,32 +48,40 @@ async def test_repl_character_flow(chat, tmp_path, capsys, shipped):
     chat.seed_builtin_characters()
     keys = (
         "/char list\r"
-        "/char use rowan\r"
+        "/char use alpha\r"
         "merhaba\r"
         "/persona set\r"
         "Mira\r"
         "Gezgin bir şifacı.\r"
         "/char new\r"
         "Deniz\r"  # name
+        "\r"  # content: skipped = standard
+        "\r"  # age: skipped (fine for a standard character)
+        "\r"  # gender: skipped
         "A fisherman from Bodrum, 40\r"  # concept
+        "\r"  # appearance: skipped
         "1,9\r"  # temperament: warm, calm
         "1\r"  # speech: short and dry
         "my own words\r"  # values: free text
         "\r"  # fear: skipped
+        "\r"  # likes: skipped
+        "\r"  # background: skipped
         "1\r"  # relationship: strangers
+        "\r"  # history: skipped
         "1\r"  # genre: modern day
         "On the pier at dawn\r"  # place
         "Deniz bugün huysuz.\r"  # example line
         "n\r"  # no AI help
         "*Ağları topluyor.* Erkencisin.\r"  # first message typed by hand
+        "\r"  # save? (default yes)
         "\r"  # start now? (default yes)
         "/char\r"
         "/quit\r"
     )
     await run_script(chat, tmp_path, keys)
     out = capsys.readouterr().out
-    assert "Rowan" in out and "Elif" in out  # list
-    assert "Shut that door" in out  # Rowan's greeting shown
+    assert "Alpha" in out and "Beta" in out  # list
+    assert "Test greeting line" in out  # Alpha's greeting shown
     deniz = chat.store.find_character("deniz")
     assert deniz is not None
     p = deniz.card.personality
@@ -91,6 +99,9 @@ async def test_repl_character_flow(chat, tmp_path, capsys, shipped):
     assert "Character: Deniz" in out
 
 
+SKIP_12 = "\r" * 12
+
+
 async def test_repl_wizard_ai_fill_and_export_import(chat, tmp_path, capsys, monkeypatch):
     from chatclient.providers.base import StreamEvent
     from chatclient.providers.echo import EchoProvider
@@ -106,19 +117,14 @@ async def test_repl_wizard_ai_fill_and_export_import(chat, tmp_path, capsys, mon
     keys = (
         "/char new\r"
         "Mo\r"
+        "\r\r\r"  # content, age, gender skipped
         "a baker\r"
-        "\r"
-        "\r"
-        "\r"
-        "\r"
-        "\r"
-        "\r"
-        "\r"
-        "\r"  # mostly skipped
+        f"{SKIP_12}"  # appearance … example line: all skipped
         "y\r"  # AI help
         "y\r"  # accept opening scene
         "r\r"  # retry example lines
         "y\r"  # accept the retry
+        "y\r"  # save
         "n\r"  # don't start now
         "/char export mo\r"
         "/quit\r"
@@ -157,3 +163,25 @@ async def test_repl_multiline_with_alt_enter(chat, tmp_path):
     await run_script(chat, tmp_path, "satır bir\x1b\rsatır iki\r/quit\r")
     user = chat.history()[0]
     assert user.content == "satır bir\nsatır iki"
+
+
+async def test_character_wizard_mature_needs_an_adult_age(chat, tmp_path, capsys):
+    from chatclient.characters import card_content
+
+    answers = [
+        "/char new", "Aras", "2",   # name, content: mature
+        "16", "31",                 # under 18 is asked again
+        "1", "runs a bar", "tall",  # gender, concept, appearance
+        "6", "1", "1", "", "jazz", "",  # temperament, speech, values, fear, likes, background
+        "2", "we kissed once", "6", "his flat",  # relationship, history, genre, place
+        "1,2", "",                  # themes, example line
+        "n", "Hi.", "y", "n",       # no AI help, opening line, save, don't start
+        "/quit",
+    ]  # fmt: skip
+    await run_script(chat, tmp_path, "\r".join(answers) + "\r")
+    out = capsys.readouterr().out
+    assert "18 or older" in out
+    aras = chat.store.find_character("Aras")
+    assert aras is not None and card_content(aras.card) == "mature"
+    assert aras.card.description.startswith("{{char}} is a 31-year-old man.")
+    assert "old friends who go back years. we kissed once." in aras.card.scenario

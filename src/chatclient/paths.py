@@ -7,6 +7,7 @@ directory (useful for tests and portable installs).
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,8 +48,23 @@ class AppPaths:
             d.mkdir(parents=True, exist_ok=True)
 
 
+PORTABLE_MARKER = "portable"
+PORTABLE_DIR = "ChatClientData"
+
+
+def portable_home() -> Path | None:
+    """Portable mode: a file named ``portable`` next to the install (the venv, or the
+    folder holding it) keeps all data in ``ChatClientData`` beside it (e.g. on a USB
+    stick). Otherwise data goes to the user's data folder, safe from reinstalls."""
+    prefix = Path(sys.prefix)
+    for folder in (prefix, prefix.parent):
+        if (folder / PORTABLE_MARKER).is_file():
+            return folder / PORTABLE_DIR
+    return None
+
+
 def resolve_paths(home: str | os.PathLike[str] | None = None) -> AppPaths:
-    home = home or os.environ.get("CHATCLIENT_HOME")
+    home = home or os.environ.get("CHATCLIENT_HOME") or portable_home()
     if home:
         root = Path(home).expanduser().resolve()
         return AppPaths(config_dir=root, data_dir=root, log_dir=root / "logs")

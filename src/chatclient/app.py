@@ -15,8 +15,10 @@ from logging.handlers import RotatingFileHandler
 from chatclient import __version__
 from chatclient.config import Config, ConfigError, load_config
 from chatclient.core.chat import ChatError, ChatService, TurnResult
-from chatclient.i18n import Translator
+from chatclient.i18n import LANG_KEY, Translator
 from chatclient.keys import SOURCE_KEYCHAIN, KeyStore
+from chatclient.library import Library
+from chatclient.memory.engine import MemoryEngine
 from chatclient.paths import AppPaths, resolve_paths
 from chatclient.providers.base import ProviderError
 from chatclient.providers.registry import ProviderRegistry, verify_key
@@ -39,6 +41,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--lang", choices=["auto", "tr", "en"], help="interface language")
     p.add_argument("--set-key", metavar="PROVIDER", help="store an API key in the OS keychain")
     p.add_argument("--debug", action="store_true", help="verbose logging to the log file")
+    p.add_argument(
+        "--eval-memory",
+        action="store_true",
+        help="measure the memory brief with a real model (uses -m, else the utility/chat model)",
+    )
     return p.parse_args(argv)
 
 
@@ -77,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.set_key:
         return set_key(args.set_key, config, KeyStore(paths.key_file))
+    if args.eval_memory:
+        return asyncio.run(eval_memory(args, config, paths))
 
     notes = [t("config_created", path=paths.config_file)] if created else []
     try:
@@ -121,6 +130,22 @@ def set_key(provider: str, config: Config, keys: KeyStore) -> int:
     return 0
 
 
+async def eval_memory(args: argparse.Namespace, config: Config, paths: AppPaths) -> int:
+    from chatclient.memory.evaluate import run_eval
+
+    model = args.model or config.models.utility or config.models.chat
+    if not model:
+        store = Store(paths.db_file)
+        model = store.kv_get("last_model") or ""
+        store.close()
+    if not model:
+        print("error: no model; use -m provider:model", file=sys.stderr)
+        return 1
+    print(f"Evaluating the memory brief with {model}…")
+    rate = await run_eval(config, model, paths.data_dir / "models")
+    return 0 if rate >= 0.5 else 1
+
+
 async def run(
     args: argparse.Namespace, config: Config, paths: AppPaths, t: Translator, notes: list[str]
 ) -> int:
@@ -129,9 +154,16 @@ async def run(
     except ValueError as e:
         print(f"config: {e}", file=sys.stderr)
         return 2
-    store = Store(paths.db_file, tz=tz, day_boundary=config.memory.day_boundary)
+    library = Library(paths.data_dir)
+    store = Store(paths.db_file, tz=tz, day_boundary=config.memory.day_boundary, library=library)
+    library.sync(store)  # files are the source of truth; quick when nothing changed
+    if not args.lang and (saved_lang := store.kv_get(LANG_KEY)):
+        t.set_language(saved_lang)  # chosen in the app with /lang
     registry = ProviderRegistry(config, KeyStore(paths.key_file))
-    chat = ChatService(config, store, registry)
+    memory = MemoryEngine(config, store, registry) if config.memory.enabled else None
+    if memory is not None:
+        await memory.start_semantic(paths.data_dir / "models")
+    chat = ChatService(config, store, registry, memory)
     chat.seed_builtin_characters()
     try:
         if args.char:
