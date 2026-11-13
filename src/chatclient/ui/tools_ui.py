@@ -149,7 +149,8 @@ class ToolCommands:
             "data": root,
             "characters": root / "characters",
             "personas": root / "personas",
-            "chats": root / "chats",
+            "plain-chats": root / "plain-chats",
+            "chats": root / "plain-chats",
             "exports": root / "exports",
         }
         if what.lower() in folders:

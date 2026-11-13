@@ -4,7 +4,7 @@
     characters/<name>/chats/<date>_<id>.jsonl
     characters/<name>/memory.jsonl       snapshot of what memory learned
     personas/<name>/persona.json
-    chats/<date>_<id>.jsonl              chats without a character
+    plain-chats/<date>_<id>.jsonl        chats without a character
 
 A chat file is an append-only log of events, one JSON object per line: a header
 (``session``), then ``msg``, ``edit``, ``meta`` and ``set`` events. Every change is
@@ -149,7 +149,8 @@ class Library:
         self.root = Path(root)
         self.characters_dir = self.root / "characters"
         self.personas_dir = self.root / "personas"
-        self.chats_dir = self.root / "chats"
+        self.chats_dir = self.root / "plain-chats"  # chats without a character
+        self._legacy_chats_dir = self.root / "chats"  # its name before
         self.exports_dir = self.root / "exports"
         self._folders: dict[str, Path] = {}
 
@@ -372,10 +373,26 @@ class Library:
         if not (self.root / MARKER).exists():
             self.migrate(store)
             return
+        self._move_legacy_chats()
         with store.quiet():
             cards_ok = self._sync_cards(store)
             self._sync_chats(store, delete_missing=cards_ok)
             self._sync_memory(store)
+
+    def _move_legacy_chats(self) -> None:
+        """chats/ was renamed plain-chats/ (less confusing next to characters/*/chats)."""
+        old = self._legacy_chats_dir
+        if not old.is_dir():
+            return
+        self.chats_dir.mkdir(parents=True, exist_ok=True)
+        for f in old.glob("*.jsonl"):
+            target = self.chats_dir / f.name
+            if not target.exists():
+                os.replace(f, target)
+        try:
+            old.rmdir()  # only if empty: anything else in it is left alone
+        except OSError:
+            log.warning("%s is not empty; left in place", old)
 
     def _card_folders(self) -> list[tuple[str, Path]]:
         out = []

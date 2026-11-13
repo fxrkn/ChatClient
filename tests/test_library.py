@@ -98,7 +98,7 @@ async def test_changes_made_to_the_files_are_picked_up(home):
     chat.new_session(model="echo:echo")
     await say(chat, "hello")
     s = chat.require_session()
-    (path,) = (root / "chats").glob("*.jsonl")
+    (path,) = (root / "plain-chats").glob("*.jsonl")
     reply = chat.last_reply()
     with open(path, "a", encoding="utf-8") as f:  # edited elsewhere (another device, by hand)
         f.write(json.dumps({"t": "edit", "id": reply.uuid, "content": "changed"}) + "\n")
@@ -133,7 +133,7 @@ async def test_a_half_written_line_is_skipped_and_repaired(home):
     root, _lib, store, chat = home
     chat.new_session(model="echo:echo")
     await say(chat, "hello")
-    (path,) = (root / "chats").glob("*.jsonl")
+    (path,) = (root / "plain-chats").glob("*.jsonl")
     with open(path, "a", encoding="utf-8") as f:
         f.write('{"t": "msg", "id": "cut-off-by-a-cra')
     await say(chat, "after the crash")  # starts on a fresh line
@@ -236,7 +236,7 @@ async def test_a_chat_file_can_be_imported_alone(home, tmp_path):
     root, _lib, _store, chat = home
     chat.new_session(model="echo:echo")
     await say(chat, "portable chat")
-    (path,) = (root / "chats").glob("*.jsonl")
+    (path,) = (root / "plain-chats").glob("*.jsonl")
     _other_lib, other, other_chat = open_home(tmp_path / "other")
     got = _other_lib.import_path(other, path)
     assert got.kind == "chat" and not got.copy
@@ -275,3 +275,17 @@ def test_portable_mode_keeps_data_next_to_the_install(tmp_path, monkeypatch):
     assert resolve_paths().data_dir != tmp_path / "ChatClient" / "ChatClientData"
     (tmp_path / "ChatClient" / "portable").write_text("")
     assert resolve_paths().data_dir == (tmp_path / "ChatClient" / "ChatClientData").resolve()
+
+
+async def test_the_old_chats_folder_moves_to_plain_chats(home):
+    root, _lib, store, chat = home
+    chat.new_session(model="echo:echo")
+    await say(chat, "from before the rename")
+    store.close()
+    old = root / "chats"
+    (root / "plain-chats").rename(old)  # as an earlier version left it
+    _lib, store2, chat2 = open_home(root)
+    assert not old.exists() and len(list((root / "plain-chats").glob("*.jsonl"))) == 1
+    chat2.open_session(store2.latest_session().id)
+    assert chat2.history()[0].content == "from before the rename"
+    store2.close()

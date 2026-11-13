@@ -755,7 +755,7 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
                 self.info(f"config:     {self.paths.config_file}")
                 self.info(f"characters: {root / 'characters'}")
                 self.info(f"personas:   {root / 'personas'}")
-                self.info(f"chats:      {root / 'chats'}")
+                self.info(f"plain chats: {root / 'plain-chats'}")
                 self.info(f"index:      {self.paths.db_file}")
                 self.info(f"logs:       {self.paths.log_file}")
             case _:

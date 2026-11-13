@@ -66,7 +66,7 @@ Characters, personas and chats are plain files in your user data folder
 ```
 characters/<name>/card.json, chats/*.jsonl, memory.jsonl
 personas/<name>/persona.json
-chats/*.jsonl
+plain-chats/*.jsonl          (chats without a character)
 ```
 
 `/open` shows a folder, `/char export` and `/import` move characters and chats between

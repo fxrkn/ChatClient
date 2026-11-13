@@ -624,7 +624,7 @@ COMMAND_DOCS: tuple[CommandDoc, ...] = (
     CommandDoc("/copy", "", "copy the last reply (/copy all: the whole chat)", "son yanıtı kopyala (/copy all: tüm sohbet)"),
     CommandDoc("/export", "", "save the chat as md, html, txt or jsonl (jsonl: re-importable)", "sohbeti md, html, txt ya da jsonl olarak kaydet (jsonl: geri yüklenebilir)"),
     CommandDoc("/import", "<file>", "import a character (.zip/.json/.png), a persona or a chat (.jsonl)", "karakter (.zip/.json/.png), persona ya da sohbet (.jsonl) içe aktar", "<dosya>"),
-    CommandDoc("/open", "", "open a folder: a character's, or data, characters, personas, chats, exports", "klasör aç: karakterinki ya da data, characters, personas, chats, exports"),
+    CommandDoc("/open", "", "open a folder: a character's, or data, characters, personas, plain-chats, exports", "klasör aç: karakterinki ya da data, characters, personas, plain-chats, exports"),
     CommandDoc("/search", "<text>", "search messages (/search --all: every session)", "mesajlarda ara (/search --all: tüm oturumlar)", "<metin>"),
     CommandDoc("/model", "", "change the model (pick from a list, or /model provider:model)", "modeli değiştir (listeden seç ya da /model sağlayıcı:model)"),
     CommandDoc("/models", "", "list available models", "kullanılabilir modelleri listele"),
