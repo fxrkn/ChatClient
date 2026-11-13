@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chatclient"
+version = "0.1.0"
+description = "Lightweight terminal AI chat for conversation, storytelling and roleplay, with long-term memory."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "pydantic>=2.7",
+    "platformdirs>=4.2",
+    "prompt_toolkit>=3.0.47",
+    "rich>=13.7",
+    "keyring>=25",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+chatclient = "chatclient.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chatclient"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/chatclient", "tests", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# RUF001-003: Turkish characters in strings/comments are intentional.
+# E501: the formatter handles code; long user-facing strings stay on one line.
+ignore = ["RUF001", "RUF002", "RUF003", "E501"]

@@ -1,0 +1,183 @@
+"""Entry point: argument parsing, wiring, and the interactive or one-shot run."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import getpass
+import logging
+import os
+import sys
+import warnings
+from logging.handlers import RotatingFileHandler
+
+from chatclient import __version__
+from chatclient.config import Config, ConfigError, load_config, store_api_key
+from chatclient.core.chat import ChatError, ChatService, TurnResult
+from chatclient.i18n import Translator
+from chatclient.paths import AppPaths, resolve_paths
+from chatclient.providers.base import ProviderError
+from chatclient.providers.registry import ProviderRegistry
+from chatclient.storage import Store
+from chatclient.timeutil import resolve_tz
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="chatclient",
+        description="Terminal AI chat for conversation, storytelling and roleplay.",
+    )
+    p.add_argument("--version", action="version", version=f"chatclient {__version__}")
+    p.add_argument("-m", "--model", help="model to use, as provider:model")
+    p.add_argument("-s", "--session", type=int, help="open session by id")
+    p.add_argument("-n", "--new", action="store_true", help="start a new session")
+    p.add_argument("-c", "--char", help="start a new session with this character (name or id)")
+    p.add_argument("-p", "--prompt", help="send one message, print the reply, and exit")
+    p.add_argument("--home", help="keep config and data in this directory")
+    p.add_argument("--lang", choices=["auto", "tr", "en"], help="interface language")
+    p.add_argument("--set-key", metavar="PROVIDER", help="store an API key in the OS keychain")
+    p.add_argument("--debug", action="store_true", help="verbose logging to the log file")
+    return p.parse_args(argv)
+
+
+def setup_logging(paths: AppPaths, debug: bool) -> None:
+    handler = RotatingFileHandler(
+        paths.log_file, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(logging.DEBUG if debug else logging.INFO)
+    for noisy in ("httpx", "httpcore", "httpx2", "anthropic"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+def _configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
+def main(argv: list[str] | None = None) -> int:
+    _configure_stdio()
+    args = parse_args(argv)
+    paths = resolve_paths(args.home)
+    paths.ensure()
+    setup_logging(paths, args.debug)
+
+    created = not paths.config_file.exists()
+    try:
+        config = load_config(paths.config_file)
+    except ConfigError as e:
+        print(e, file=sys.stderr)
+        return 2
+    t = Translator(args.lang or config.ui.language)
+
+    if args.set_key:
+        return set_key(args.set_key, config)
+
+    notes = [t("config_created", path=paths.config_file)] if created else []
+    try:
+        return asyncio.run(run(args, config, paths, t, notes))
+    except KeyboardInterrupt:
+        return 130
+
+
+def set_key(provider: str, config: Config) -> int:
+    if provider not in config.providers:
+        print(f"unknown provider '{provider}' (configured: {', '.join(config.providers)})")
+        return 2
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", getpass.GetPassWarning)
+            key = getpass.getpass(f"API key for {provider} (input hidden): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        key = ""
+    if not key:
+        print("no key entered")
+        return 1
+    try:
+        store_api_key(provider, key)
+    except Exception as e:
+        env = config.providers[provider].api_key_env or f"{provider.upper()}_API_KEY"
+        print(f"could not store key in the OS keychain: {e}")
+        print(f"use an environment variable instead, e.g. {env}=<your key>")
+        return 1
+    print(f"stored key for {provider} in the OS keychain")
+    return 0
+
+
+async def run(
+    args: argparse.Namespace, config: Config, paths: AppPaths, t: Translator, notes: list[str]
+) -> int:
+    try:
+        tz = resolve_tz(config.memory.timezone)
+    except ValueError as e:
+        print(f"config: {e}", file=sys.stderr)
+        return 2
+    store = Store(paths.db_file, tz=tz, day_boundary=config.memory.day_boundary)
+    registry = ProviderRegistry(config)
+    chat = ChatService(config, store, registry)
+    chat.seed_builtin_characters()
+    try:
+        if args.char:
+            char = store.find_character(args.char, "ai")
+            if char is None:
+                print(f"error: no character matches {args.char!r}", file=sys.stderr)
+                return 1
+            chat.new_session(character_id=char.id)
+        elif args.session:
+            chat.open_session(args.session)
+        elif args.new:
+            chat.new_session()
+        else:
+            chat.resume_or_create()
+
+        if args.model:
+            chat.set_model(args.model)
+        elif chat.require_session().model is None:
+            default = chat.default_model()
+            if default:
+                chat.set_model(default)
+            else:
+                ref = await registry.autodetect()
+                if ref:
+                    chat.set_model(str(ref))
+                    notes.append(t("autodetected", model=str(ref)))
+                else:
+                    notes.append(t("no_local"))
+
+        if args.prompt is not None:
+            return await one_shot(chat, args.prompt, t)
+
+        from chatclient.ui.render import enable_windows_vt
+        from chatclient.ui.repl import run_repl
+
+        enable_windows_vt()
+        await run_repl(chat, t, paths, notes, config.ui.show_stats)
+        return 0
+    except (ChatError, ProviderError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await registry.aclose()
+        store.close()
+
+
+async def one_shot(chat: ChatService, prompt: str, t: Translator) -> int:
+    if chat.require_session().model is None:
+        print(t("no_model"), file=sys.stderr)
+        return 1
+    result = TurnResult()
+    try:
+        async for ev in chat.send(prompt, result):
+            if ev.text:
+                sys.stdout.write(ev.text)
+                sys.stdout.flush()
+    finally:
+        sys.stdout.write("\n")
+    if os.environ.get("CHATCLIENT_STATS"):
+        print(f"[{result.model} · {result.elapsed:.2f}s]", file=sys.stderr)
+    return 0

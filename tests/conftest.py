@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import pytest
+
+from chatclient.characters import Card
+from chatclient.config import Config, ProviderConfig
+from chatclient.core.chat import ChatService
+from chatclient.providers.echo import EchoProvider
+from chatclient.providers.registry import ProviderRegistry
+from chatclient.storage import Store
+
+ROWAN = Card(
+    name="Rowan",
+    description="{{char}} keeps the Lantern & Thorn, a stone inn at a lonely crossroads.",
+    personality="Gentle giant: slow to speak, quick to notice.",
+    scenario="Late autumn, after dark. {{user}} arrives alone.",
+    first_mes="*The cracked bell clangs.* Shut that door before the wood comes in, friend.",
+    mes_example="<START>\n{{user}}: How much for a room?\n{{char}}: Two coppers.",
+    tags=["fantasy"],
+)
+ELIF = Card(
+    name="Elif",
+    description="{{char}} Kadıköy'de küçük bir sahaf işletiyor.",
+    personality="Sıcak ama mesafeli.",
+    first_mes="*Başını kaldırıyor.* Hoş geldin.",
+    tags=["türkçe"],
+)
+
+
+@pytest.fixture
+def store(tmp_path):
+    s = Store(tmp_path / "test.db")
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def config():
+    return Config(
+        providers={
+            "local": ProviderConfig(type="openai_compat", base_url="http://localhost:1234/v1"),
+        }
+    )
+
+
+@pytest.fixture
+def chat(config, store, monkeypatch):
+    monkeypatch.setattr(EchoProvider, "delay", 0.0)
+    registry = ProviderRegistry(config)
+    service = ChatService(config, store, registry)
+    service.new_session(model="echo:echo")
+    return service
+
+
+@pytest.fixture
+def shipped(monkeypatch):
+    """Pretend the app ships these characters (none are bundled for real)."""
+    cards = {"rowan": ROWAN, "elif": ELIF}
+    monkeypatch.setattr("chatclient.core.chat.builtin_cards", lambda: dict(cards))
+    return cards
