@@ -13,7 +13,7 @@
 Windows (PowerShell):
 
 ```powershell
-git clone <repo-url> ChatClient
+git clone https://github.com/fxrkn/ChatClient.git
 cd ChatClient
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
@@ -23,7 +23,7 @@ python -m venv .venv
 Linux / macOS:
 
 ```bash
-git clone <repo-url> ChatClient
+git clone https://github.com/fxrkn/ChatClient.git
 cd ChatClient
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -66,3 +66,7 @@ pip install -e ".[dev]"
 pytest
 ruff check src tests
 ```
+
+## License
+
+[MIT](LICENSE)
