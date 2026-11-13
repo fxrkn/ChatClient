@@ -1,6 +1,6 @@
 # ChatClient
 
-![ChatClient Banner](banner.png)
+![ChatClient Banner](docs/banner.png)
 
 > **Disclaimer:** This project is currently in the testing stage.
 
