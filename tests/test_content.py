@@ -81,7 +81,10 @@ async def test_private_session_does_no_memory_work(mem):
     chat.set_private(True)
     await say(chat, "a secret")
     assert engine.repo.next_job() is None  # nothing queued
-    assert not any("memory brief" in s for s in seen)  # text went to no utility model
+    # only the director's brief runs (no search results in it); no memory job of any kind
+    briefs = [s for s in seen if "memory brief" in s]
+    assert all("(none found)" in s for s in briefs)
+    assert not any('{"memories"' in s or "story so far" in s for s in seen)
     assert chat.refresh().private
 
 
@@ -246,11 +249,10 @@ def test_who_leads_is_a_per_character_choice(chat):
     kai = chat.store.add_character("ai", card)
     chat.new_session(model="echo:echo", character_id=kai.id)
     base = chat.effective_system_prompt()
-    assert "add one thing of Kai's own" in base  # balanced: the default rule only
-    assert "likes to take the lead" not in base and card_initiative(card) == "balanced"
+    assert card_initiative(card) == "balanced"
     set_card_initiative(card, "lead")
     chat.store.update_character(kai.id, card)
-    assert "Kai likes to take the lead" in chat.effective_system_prompt()
-    set_card_initiative(card, "follow")
-    chat.store.update_character(kai.id, card)
-    assert "mostly follows" in chat.effective_system_prompt()
+    assert card_initiative(card) == "lead"
+    # the setting no longer reaches the system prompt: the director weighs it instead
+    assert chat.effective_system_prompt() == base
+    assert "take the lead" not in base and "follows" not in base

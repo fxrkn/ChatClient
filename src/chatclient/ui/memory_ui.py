@@ -55,6 +55,8 @@ class MemoryCommands:
                 did = False
             finally:
                 self.job_task = None
+            if did and self.panel is not None:
+                self.panel.refresh()  # new memories, a new scene
             if not did:
                 await asyncio.sleep(3)
 
@@ -273,6 +275,26 @@ class MemoryCommands:
         for key, value in s.scene.items():
             shown = "; ".join(value) if isinstance(value, list) else str(value)
             self.console.print(f"  {key:<13} {shown}", style=self.style("text"), markup=False)
+
+    def direction_command(self: Repl) -> None:
+        """Show the private note the last reply was written under."""
+        direction = self.chat.current_direction()
+        if not direction:
+            engine = self.chat.memory
+            if self.chat.session is not None and self.chat.character() is None:
+                self.info(self.t("direction_why_no_character"))
+            elif engine is None or not engine.cfg.enabled:
+                self.info(self.t("direction_why_memory_off"))
+            elif not engine.cfg.brief:
+                self.info(self.t("direction_why_brief_off"))
+            elif error := engine.brief_error_for(
+                self.chat.session.id if self.chat.session else None
+            ):
+                self.info(self.t("direction_why_failed", error=error))
+            else:
+                self.info(self.t("direction_none"))
+            return
+        self.console.print(direction, style=self.style("text"), markup=False)
 
     def summary_command(self: Repl) -> None:
         engine = self.engine()

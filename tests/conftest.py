@@ -28,6 +28,22 @@ BETA = Card(
 )
 
 
+@pytest.fixture
+def real_panel_possible():
+    """The real Repl.panel_possible (the autouse fixture below replaces it)."""
+    from chatclient.ui.repl import Repl
+
+    return Repl.panel_possible
+
+
+@pytest.fixture(autouse=True)
+def terminal_for_panel(monkeypatch, real_panel_possible):
+    """Tests run without a terminal; the panel layout is allowed anyway."""
+    from chatclient.ui.repl import Repl
+
+    monkeypatch.setattr(Repl, "panel_possible", lambda self: True)
+
+
 @pytest.fixture(autouse=True)
 def fake_keychain(monkeypatch):
     """Tests never touch the real OS keychain: an in-memory one replaces it."""

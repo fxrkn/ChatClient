@@ -212,7 +212,10 @@ class ToolCommands:
         engine = self.chat.memory
         if value and engine is not None:
             engine.failures = 0  # a new model gets a fresh start (and a fresh warning)
+            engine.brief_failures = 0
+            engine.last_brief_error = ""
             self.memory_warned = False
+            self.brief_warned = False
 
     def fallback_command(self: Repl, arg: str) -> None:
         value = arg.strip()

@@ -31,6 +31,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from chatclient.characters import INITIATIVE_HINTS, apply_macros, card_initiative
 from chatclient.config import Config
 from chatclient.core.context import StoryPart
 from chatclient.memory import tasks
@@ -60,6 +61,7 @@ STRUGGLING_AFTER = 3  # failed memory jobs in a row before the user is told
 LAST_OK_KEY = "memory_last_ok"  # when a memory job last succeeded
 CURSOR_KEY = "memory_cursor:{session}"
 REFLECT_KEY = "reflect_cursor:{scope}"
+BRIEF_STRUGGLING_AFTER = 2  # failed briefs in a row before the user is told
 MAX_ATTEMPTS = 3
 MAX_PASS_MESSAGES = 30  # a long backlog is condensed from its most recent part
 MAX_LINE_CHARS = 1200  # very long messages are shortened in prompts
@@ -67,6 +69,7 @@ QUOTE_CHARS = 240  # raw-message quotes in prompts
 INDEX_BATCH = 64
 REFLECT_EVERY = 12  # new memories before an insight pass
 BRIEF_RECENT = 8  # recent messages the brief sees
+DIRECTOR_CARD_CHARS = 700  # per card field, in the brief's view of the character
 CANDIDATES = {"memory": 12, "quote": 8, "day": 3}
 FALLBACK_PICK = {"memory": 6, "quote": 3, "day": 1}  # when no brief is available
 # Semantic hits must be close in absolute terms and relative to the best hit; without a
@@ -125,6 +128,7 @@ class Recall:
 class MemoryContext:
     story: list[StoryPart] = field(default_factory=list)  # for the system prompt
     note: str = ""  # scene, conflicts, recall, fact checks: next to the newest message
+    direction: str = ""  # the brief's private direction for this one reply
     recall: Recall = field(default_factory=Recall)
     conflicts: list[Conflict] = field(default_factory=list)
 
@@ -134,6 +138,7 @@ class _Prefetched:
     text: str
     candidates: Candidates
     brief: Brief | None
+    failure: str = ""  # why the prefetched brief failed, if it did
 
 
 class MemoryEngine:
@@ -149,6 +154,9 @@ class MemoryEngine:
         self._prefetched: dict[int, _Prefetched] = {}
         self.failures = 0  # memory jobs failed in a row (the model can't do the task)
         self.last_failure = ""
+        self.brief_failures = 0  # briefs failed in a row (no direction, no smart recall)
+        self.last_brief_error = ""
+        self._brief_error_session: int | None = None  # the session it happened in
         self.repo.reset_stale_jobs()
 
     # ── semantic search setup ───────────────────────────────────────────────
@@ -652,44 +660,133 @@ class MemoryEngine:
             return f'({item.local_day}) {who}: "{body}"'
         return f"({item.day}) {item.content}"
 
+    def _director_view(self, session: Session, content: str) -> dict[str, str]:
+        """What the brief needs to also write the direction: who the character is (name,
+        description, personality, trimmed), the initiative setting as a hint, the current
+        scene and the content mode. Empty without a character."""
+        ch = self.store.get_character(session.character_id)
+        if ch is None:
+            return {}
+        char, user = self.names(session)
+        card = ch.card
+        parts = [
+            apply_macros(t.strip()[:DIRECTOR_CARD_CHARS], char, user)
+            for t in (card.description, card.personality)
+            if t.strip()
+        ]
+        scene = " · ".join(
+            f"{k}: {v}" for k, v in (session.scene or {}).items() if v and k != "threads"
+        )
+        threads = (session.scene or {}).get("threads")
+        if threads:
+            scene += " · open: " + "; ".join(str(t) for t in threads)
+        hint = INITIATIVE_HINTS.get(card_initiative(card), "")
+        return {
+            "profile": "\n".join(parts) or char,
+            "initiative": apply_macros(hint, char, user),
+            "scene": scene,
+            "content": content,
+        }
+
     async def make_brief(
-        self, session: Session, text: str, recent: Sequence[Message], cands: Candidates
+        self,
+        session: Session,
+        text: str,
+        recent: Sequence[Message],
+        cands: Candidates,
+        content: str = "",
     ) -> Brief | None:
+        """One brief for a message that is being sent (a failure counts toward the
+        warning). Keystroke prefetch uses ``_attempt_brief`` and counts at send time."""
+        brief, failure = await self._attempt_brief(session, text, recent, cands, content)
+        self._note_brief(session.id, brief, failure, count=True)
+        return brief
+
+    def _note_brief(
+        self, session_id: int, brief: Brief | None, failure: str, *, count: bool
+    ) -> None:
+        """Remember how a brief went. ``count`` moves the in-a-row counter (once per
+        sent message); the reason is kept either way, so /direction can show it."""
+        if failure:
+            self.last_brief_error = failure
+            self._brief_error_session = session_id
+            if count:
+                self.brief_failures += 1
+        elif brief is not None:
+            self.last_brief_error = ""  # an empty direction is not an error
+            if count:
+                self.brief_failures = 0
+
+    def brief_error_for(self, session_id: int | None) -> str:
+        """The last brief failure, only if it happened in this session."""
+        return self.last_brief_error if session_id == self._brief_error_session else ""
+
+    async def _attempt_brief(
+        self,
+        session: Session,
+        text: str,
+        recent: Sequence[Message],
+        cands: Candidates,
+        content: str = "",
+    ) -> tuple[Brief | None, str]:
+        """(brief, "") or (None, why it failed); (None, "") when the brief is off."""
         if not self.cfg.brief:
-            return None
+            return None, ""
         try:
             ref = self.utility_ref(session)
-        except MemoryUnavailable:
-            return None
+        except MemoryUnavailable as e:
+            return None, str(e) or "no model for memory work"
         char, user = self.names(session)
         prompt = tasks.brief_prompt(
             char, user, calendar(self.today()), self._lines(session, recent), text,
             [(cid, self._candidate_text(session, item)) for cid, item in cands.items()],
+            **self._director_view(session, content),
         )  # fmt: skip
         try:
             raw = await asyncio.wait_for(
-                self._complete(ref, prompt, max_tokens=500, schema=tasks.BRIEF_SCHEMA),
+                self._complete(ref, prompt, max_tokens=800, schema=tasks.BRIEF_SCHEMA),
                 self.cfg.brief_timeout,
             )
         except (TimeoutError, ProviderError) as e:
             log.info("brief unavailable: %s", e)
-            return None
+            if isinstance(e, TimeoutError):
+                return None, f"no answer within {self.cfg.brief_timeout:g}s"
+            lines = str(e).strip().splitlines()
+            return None, f"{ref.provider}: {lines[0] if lines else type(e).__name__}"
         brief = tasks.parse_brief(raw)
         if brief is None:
             log.info("brief unreadable: %r", raw[:200] or "(no text: the model only reasoned)")
-        return brief
+            return None, f"{ref.model}: " + ("unreadable answer" if raw.strip() else "empty answer")
+        return brief, ""
+
+    @property
+    def brief_struggling(self) -> bool:
+        """The brief (and so the direction) keeps failing: the user should be told once."""
+        return self.brief_failures >= BRIEF_STRUGGLING_AFTER
 
     async def prefetch(
-        self, session: Session, text: str, branch: list[Message], visible: set[int]
+        self,
+        session: Session,
+        text: str,
+        branch: list[Message],
+        visible: set[int],
+        content: str = "",
     ) -> None:
         """Prepare the brief for a draft while the user is still typing."""
         text = text.strip()
-        if not self.cfg.enabled or session.private or not text:
+        if not self.cfg.enabled or not text:
             return
-        previous = next((m.content for m in reversed(branch) if m.role == "assistant"), "")
-        cands = await self.candidates(session, text, branch, visible, context=previous[-600:])
-        brief = await self.make_brief(session, text, branch[-BRIEF_RECENT:], cands)
-        self._prefetched[session.id] = _Prefetched(text, cands, brief)
+        if session.private:  # direction only: no search, nothing stored
+            cands = Candidates()
+        else:
+            previous = next((m.content for m in reversed(branch) if m.role == "assistant"), "")
+            cands = await self.candidates(session, text, branch, visible, context=previous[-600:])
+        brief, failure = await self._attempt_brief(
+            session, text, branch[-BRIEF_RECENT:], cands, content
+        )
+        # drafts come and go: only the reason is kept now; the send counts the failure
+        self._note_brief(session.id, brief, failure, count=False)
+        self._prefetched[session.id] = _Prefetched(text, cands, brief, failure)
 
     def forget_session(self, session_id: int) -> None:
         """Drop in-memory state for a session (its vectors leave the search index)."""
@@ -708,30 +805,49 @@ class MemoryEngine:
         text: str,
         branch: list[Message],
         visible: set[int] | None = None,
+        content: str = "",
     ) -> MemoryContext:
         """Everything memory adds to this turn's prompt. ``branch`` ends with the user's
         new message (when there is one).
 
-        A private session gets nothing: its text is not sent to the utility model, and
-        nothing remembered elsewhere is mixed into it."""
-        if not self.cfg.enabled or session.private:
+        A private session gets no memory: no search, no recall from elsewhere, nothing
+        stored. It still gets a direction (the brief runs with no candidates)."""
+        if not self.cfg.enabled:
             return MemoryContext()
+        if session.private:
+            if not text:
+                return MemoryContext()
+            earlier = branch[:-1] if branch and branch[-1].role == "user" else branch
+            ready = self.prefetched_for(session.id, text)
+            if ready is not None:
+                brief = ready.brief
+                self._note_brief(session.id, brief, ready.failure, count=True)
+            else:
+                brief = await self.make_brief(
+                    session, text, earlier[-BRIEF_RECENT:], Candidates(), content
+                )
+            self._prefetched.pop(session.id, None)
+            return MemoryContext(direction=brief.direction if brief is not None else "")
         visible = visible or set()
         ids = {m.id for m in branch}
         story = self._story(session, ids)
 
         rec = Recall()
+        brief: Brief | None = None  # a continuation (no text) has no brief
         if text:
             earlier = branch[:-1] if branch and branch[-1].role == "user" else branch
             ready = self.prefetched_for(session.id, text)
             if ready is not None:
                 cands, brief = ready.candidates, ready.brief
+                self._note_brief(session.id, brief, ready.failure, count=True)
             else:
                 previous = next((m.content for m in reversed(earlier) if m.role == "assistant"), "")
                 cands = await self.candidates(
                     session, text, branch, visible, context=previous[-600:]
                 )
-                brief = await self.make_brief(session, text, earlier[-BRIEF_RECENT:], cands)
+                brief = await self.make_brief(
+                    session, text, earlier[-BRIEF_RECENT:], cands, content
+                )
             rec = self._select(session, cands, brief, visible)
         self._prefetched.pop(session.id, None)
         self.repo.mark_used([m.id for m in rec.memories])
@@ -741,6 +857,7 @@ class MemoryEngine:
         return MemoryContext(
             story=story,
             note=self.format_note(session, rec, conflicts),
+            direction=brief.direction if brief is not None else "",
             recall=rec,
             conflicts=conflicts,
         )

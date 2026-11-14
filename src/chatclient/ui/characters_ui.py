@@ -74,8 +74,10 @@ class CharacterCommands:
     """Mixin for :class:`Repl`; relies on its ``chat``, ``t``, ``console`` and helpers."""
 
     async def ask(self: Repl, question: str, default: str = "") -> str:
-        session: PromptSession[str] = PromptSession(key_bindings=_ask_bindings(), multiline=True)
         self.heading(question)
+        if self.panel is not None:  # the panel layout asks in its own input box
+            return (await self.panel.ask(question, default)).strip()
+        session: PromptSession[str] = PromptSession(key_bindings=_ask_bindings(), multiline=True)
         return (await session.prompt_async("  › ", default=default)).strip()
 
     def char_names(self: Repl) -> list[str]:
@@ -196,10 +198,11 @@ class CharacterCommands:
 
     def start_char(self: Repl, char: Character) -> None:
         self.chat.new_session(character_id=char.id)
+        self.reset_chat_area()
         self.info(self.t("char_started", name=char.name, id=self.chat.require_session().id))
         if self.chat.require_session().model is None:
             self.warn(self.t("no_model"))
-        self.show_history(3)
+        self.show_history(3, top=True)
 
     def show_card(self: Repl, card: Card) -> None:
         for f in EDITABLE_FIELDS:
@@ -219,8 +222,13 @@ class CharacterCommands:
         hint = self.t("choice_hint_multi", n=max_n) if max_n > 1 else self.t("choice_hint")
         self.heading(question)
         self.console.print(f"  {menu}", style=self.style("text"), markup=False)
-        session: PromptSession[str] = PromptSession(key_bindings=_ask_bindings(), multiline=True)
-        answer = await session.prompt_async(f"  {hint} › ")
+        if self.panel is not None:
+            answer = await self.panel.ask(f"{question}  ({hint})")
+        else:
+            session: PromptSession[str] = PromptSession(
+                key_bindings=_ask_bindings(), multiline=True
+            )
+            answer = await session.prompt_async(f"  {hint} › ")
         return parse_choice(answer, opts, max_n)
 
     async def create_char(self: Repl) -> None:

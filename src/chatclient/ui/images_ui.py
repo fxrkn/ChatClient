@@ -109,7 +109,7 @@ class ImageCommands:
             path = self.last_picture()
             if path is None:
                 raise ChatError(self.t("pic_none"))
-            await self.show_picture(path)
+            await self.show_picture(path, asked=True)
         elif sub.lower() == "again":
             source = self.last_picture()
             if source is None:
@@ -373,9 +373,17 @@ class ImageCommands:
         await self.announce(self.t("pic_ready", path=str(pic.path), s=f"{pic.seconds:.0f}"))
         await self.show_picture(pic.path)
 
-    async def show_picture(self: Repl, path: Path) -> None:
-        """In the terminal when it can draw (Sixel); otherwise in the image viewer."""
+    async def show_picture(self: Repl, path: Path, asked: bool = False) -> None:
+        """In the terminal when it can draw (Sixel); otherwise in the image viewer.
+        In the panel layout the panel shows a preview; /pic show opens the picture."""
         cfg = self.chat.config.images
+        if self.panel is not None:
+            self.panel.refresh()
+            if asked or cfg.open:
+                from chatclient.ui.tools_ui import open_in_file_manager
+
+                open_in_file_manager(path)
+            return
         inline = sixel.supported(self.inline_setting())
         if inline:
             try:
@@ -415,8 +423,8 @@ class ImageCommands:
         """Pictures to show again when a conversation is reopened: the latest ones only
         (drawing many would make reopening slow)."""
         char = self.chat.character()
-        if char is None or not sixel.supported(self.inline_setting()):
-            return {}
+        if char is None or self.panel is not None or not sixel.supported(self.inline_setting()):
+            return {}  # (the panel shows the latest picture by itself)
         found = pictures_of(self.chat.store, char, msgs)[-HISTORY_PICTURES:]
         return {m.id: path for m, path in found}
 
@@ -431,7 +439,9 @@ class ImageCommands:
     async def announce(self: Repl, text: str, warn: bool = False) -> None:
         """Print without breaking the line being typed."""
         show = (lambda: self.warn(text)) if warn else (lambda: self.info(text))
-        if get_app_or_none() is not None and not self.streaming:
+        if self.panel is not None:  # the chat area is not where the typing happens
+            show()
+        elif get_app_or_none() is not None and not self.streaming:
             await run_in_terminal(show)
         else:
             show()

@@ -161,6 +161,61 @@ async def test_a_repeated_reply_is_rewritten_with_a_retry_event(client, chat, mo
     assert msg["result"]["message"]["content"].startswith("We walk out")
 
 
+async def test_panel_without_a_character(client):
+    got = (await client.call("panel"))["result"]
+    assert got["name"] is None and got["age"] is None and got["picture"] is None
+    assert got["personality"] == [] and got["scene"] == {} and got["memories"] == []
+    assert got["model"] == "echo:echo" and got["private"] is False
+    assert got["content"] in ("standard", "mature")
+
+
+async def test_panel_for_a_character_with_scene_and_memories(client, chat, tmp_path, monkeypatch):
+    from chatclient.config import MemoryConfig
+    from chatclient.memory.engine import MemoryEngine
+
+    chat.memory = MemoryEngine(
+        chat.config.model_copy(update={"memory": MemoryConfig(embeddings="off")}),
+        chat.store,
+        chat.registry,
+    )
+    char = chat.store.add_character("ai", ALPHA)
+    await client.call("session.new", character="Alpha")
+    s = chat.require_session()
+    chat.store.set_scene(s.id, {"location": "a harbour", "mood": " ", "time": "dusk", "x": "no"})
+    chat.memory.repo.add_memory(chat.memory.scope(s), "Alpha likes rain.", kind="preference")
+    pic = tmp_path / "shot.png"
+    pic.write_bytes(b"png")
+    monkeypatch.setattr("chatclient.serve.pictures_of", lambda *a: [(None, pic)])
+
+    got = (await client.call("panel"))["result"]
+    assert got["name"] == "Alpha" and got["personality"] == ["Calm test personality"]
+    assert got["scene"] == {"location": "a harbour", "time": "dusk"}  # blanks and unknown keys out
+    assert got["memories"] == [
+        {"content": "Alpha likes rain.", "pinned": False, "kind": "preference"}
+    ]
+    assert got["picture"] == str(pic.resolve())
+
+    chat.set_private(True)  # private chats show no memories
+    assert (await client.call("panel"))["result"]["memories"] == []
+    assert char.id == s.character_id
+
+
+async def test_panel_event_follows_a_reply_and_works_while_writing(client, monkeypatch):
+    rid = client.start("send", text="hello")
+    await client.wait(rid)
+    await asyncio.sleep(0.05)
+    assert {"event": "panel", "why": "reply"} in client.out.lines
+
+    async def slow(self, model, messages, params):
+        await asyncio.sleep(0.3)
+        yield StreamEvent(text="late")
+
+    monkeypatch.setattr(EchoProvider, "stream_chat", slow)
+    client.start("send", text="again")
+    await asyncio.sleep(0.1)
+    assert "result" in await client.call("panel")  # reading is fine meanwhile
+
+
 def test_the_real_command_line(tmp_path):
     """What the Rust TUI will do: start the process, write lines, read lines."""
     # no embedding model download in a test (or on CI)

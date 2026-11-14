@@ -15,7 +15,13 @@ from chatclient.core.chat import ChatService, TurnResult
 from chatclient.i18n import Translator
 from chatclient.memory.engine import MemoryEngine
 from chatclient.memory.repo import MemoryRepo, Scope, normalize_key, similarity, trigram_query
-from chatclient.memory.tasks import parse_brief, parse_json, parse_pass
+from chatclient.memory.tasks import (
+    BRIEF_SCHEMA,
+    brief_prompt,
+    parse_brief,
+    parse_json,
+    parse_pass,
+)
 from chatclient.paths import resolve_paths
 from chatclient.providers.base import StreamEvent
 from chatclient.providers.echo import EchoProvider
@@ -58,8 +64,25 @@ def test_parse_brief_is_forgiving():
     assert b.about_past and b.dates == [("2026-11-12", "2026-11-12")]
     assert b.relevant == ["M3", "Q7"]
     assert b.claims[0].status == "unsupported" and b.claims[1].claim == "x"
-    assert b.note == ""
+    assert b.note == "" and b.direction == ""  # direction is optional
     assert parse_brief("nothing") is None
+    d = parse_brief('{"about_past": false, "direction": "  Short banter; Ada teases.  "}')
+    assert d.direction == "Short banter; Ada teases."
+    assert parse_brief('{"direction": null}').direction == ""
+    assert "direction" in BRIEF_SCHEMA["properties"]
+
+
+def test_brief_prompt_carries_the_character_view_and_the_initiative_hint():
+    p = brief_prompt(
+        "Ada", "Ali", "today", [], "hi", [], profile="A curious sailor.",
+        initiative="Ada tends to lead.", scene="location: harbour", content="mature",
+    )  # fmt: skip
+    text = p[-1].content
+    assert "A curious sailor." in text and "Ada tends to lead." in text
+    assert "location: harbour" in text and "Content setting: mature" in text
+    assert "- direction: a private note" in text and "not a rule" in text
+    bare = brief_prompt("Ada", "Ali", "today", [], "hi", [])[-1].content
+    assert "- direction: leave empty." in bare and "Initiative hint" not in bare
 
 
 def test_text_helpers():
@@ -236,6 +259,141 @@ async def test_brief_selects_memories_and_resolves_dates(mem):
     assert chat.last_user_message().content == "Dün deniz fenerinde ne bulmuştuk?"  # clean
 
 
+async def test_the_direction_rides_next_to_the_newest_message(mem):
+    from chatclient.characters import set_card_initiative
+
+    chat, _engine, calls, briefs = mem
+    char = chat.character()
+    set_card_initiative(char.card, "lead")
+    chat.store.update_character(char.id, char.card)
+    briefs.append({"about_past": False, "direction": "Ali wants quick banter; Ada teases back."})
+    r = TurnResult()
+    await drain(chat.send("Selam Ada!", r))
+    brief_prompt = next(c for c in calls if "memory brief" in c)
+    assert "Meraklı." in brief_prompt and "Ada tends to take the lead" in brief_prompt
+    assert "Content setting: standard" in brief_prompt
+    system = r.context.messages[0].content
+    assert "take the lead" not in system  # initiative is no longer a system rule
+    last = r.context.messages[-1]
+    assert last.role == "user" and "Private direction for this one reply" in last.content
+    assert "Ali wants quick banter; Ada teases back." in last.content
+    # inside the note, after the reminder, directly in front of the newest message
+    assert last.content.index("Stay in character") < last.content.index("Ali wants quick banter")
+    assert last.content.index("Ali wants quick banter") < last.content.index("Selam Ada!")
+    assert r.direction == chat.last_direction == "Ali wants quick banter; Ada teases back."
+
+
+async def test_no_direction_means_no_section_and_no_crash(mem):
+    chat, engine, _calls, briefs = mem
+    briefs.append({"about_past": False, "direction": ""})
+    r = TurnResult()
+    await drain(chat.send("Selam!", r))
+    assert "Private direction" not in r.context.messages[-1].content
+    assert r.text and r.direction == "" and chat.last_direction == ""
+    engine.cfg.brief = False  # no brief at all: the base prompt alone
+    r2 = TurnResult()
+    await drain(chat.send("Nasılsın?", r2))
+    assert "Private direction" not in r2.context.messages[-1].content and r2.text
+
+
+async def test_direction_does_not_show_in_another_chat(mem, tmp_path, capsys):
+    chat, _engine, _calls, briefs = mem
+    briefs.append({"about_past": False, "direction": "Secret mood from chat A."})
+    await drain(chat.send("Selam", TurnResult()))
+    assert chat.current_direction() == "Secret mood from chat A."
+    chat.new_session(model="echo:echo", character_id=chat.character().id)  # chat B
+    assert chat.current_direction() == ""
+    paths = resolve_paths(tmp_path)
+    paths.ensure()
+    repl = Repl(chat, Translator("en"), paths, show_stats=False)
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        inp.send_text("/direction\r/quit\r")
+        await repl.run([])
+    out = ANSI.sub("", capsys.readouterr().out)
+    assert "No direction yet" in out and "Secret mood" not in out
+
+
+async def test_a_failing_brief_is_reported_once_and_again_after_recovery(store, tmp_path, capsys):
+    import httpx
+    import respx
+
+    config = Config(
+        memory=MemoryConfig(every_exchanges=50),
+        providers={"local": ProviderConfig(type="openai_compat", base_url="http://util/v1")},
+    )
+    registry = ProviderRegistry(config)
+    engine = MemoryEngine(config, store, registry)
+    chat = ChatService(config, store, registry, engine)
+    chat.set_utility_model("local:m")
+    char = store.add_character("ai", Card(name="Ada", personality="Curious."))
+    chat.new_session(model="echo:echo", character_id=char.id)
+    briefs = 0
+
+    def reply(request):
+        nonlocal briefs
+        if b"memory brief" not in request.content:
+            return httpx.Response(402, json={"error": {"message": "requires more credits"}})
+        briefs += 1
+        if briefs == 4:  # the one success
+            body = json.dumps({"about_past": False, "direction": "Ada is calm."})
+            data = f"data: {json.dumps({'choices': [{'delta': {'content': body}}]})}\n\ndata: [DONE]\n\n"
+            return httpx.Response(200, content=data.encode())
+        return httpx.Response(402, json={"error": {"message": "requires more credits"}})
+
+    paths = resolve_paths(tmp_path)
+    paths.ensure()
+    repl = Repl(chat, Translator("en"), paths, show_stats=False)
+    keys = "one\rtwo\rthree\r/direction\rfour\r/direction\rfive\rsix\r/quit\r"
+    with respx.mock:
+        respx.post("http://util/v1/chat/completions").mock(side_effect=reply)
+        with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+            inp.send_text(keys)
+            await repl.run([])
+    out = ANSI.sub("", capsys.readouterr().out)
+    assert out.count("The director isn't working") == 2  # after #2, not #3; again after #6
+    assert out.index("The director isn't working") < out.index(
+        "No direction: the last brief failed"
+    )
+    assert "local: " in out and "402" in out  # the provider's reason is named
+    assert "Ada is calm." in out  # the success shows, and cleared the error
+    assert engine.brief_struggling and "402" in engine.last_brief_error
+
+
+async def test_a_private_chat_gets_a_direction_but_no_memory(mem):
+    chat, engine, calls, briefs = mem
+    scope = engine.scope(chat.require_session())
+    engine.repo.add_memory(scope, "Ali'nin kedisinin adı Pamuk.")  # elsewhere: must not leak
+    chat.set_private(True)
+    store = chat.store
+
+    def snapshot():
+        return [
+            store.conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            for t in ("memories", "memories_fts", "jobs", "kv")
+        ] + [engine.repo.job_stats().get("pending", 0)]
+
+    before = snapshot()
+    briefs.append({"about_past": True, "relevant": ["M1"], "direction": "Ada is guarded; short."})
+    await engine.prefetch(chat.refresh(), "Kedim?", [], set(), "standard")  # allowed
+    assert engine.prefetched_for(chat.session.id, "Kedim?") is not None
+    r = TurnResult()
+    await drain(chat.send("Kedim?", r))
+    brief_prompt = next(c for c in calls if "memory brief" in c)
+    assert "(none found)" in brief_prompt and "Pamuk" not in brief_prompt  # no search
+    assert "Pamuk" not in calls[-1]  # nothing recalled into the reply
+    assert "Ada is guarded; short." in r.context.messages[-1].content
+    assert r.direction == chat.last_direction == "Ada is guarded; short."
+    assert r.recalled == 0
+    after = snapshot()
+    assert after[:3] == before[:3] and after[4] == before[4]  # memories, index, jobs
+    assert engine.prefetched_for(chat.session.id, "Kedim?") is None  # not kept around
+    # kv only gets the session bookkeeping the chat itself does, never memory state
+    assert not any(
+        k.startswith(("memory_", "reflect_"))
+        for (k,) in store.conn.execute("SELECT key FROM kv").fetchall()
+    )
+
+
 async def test_without_a_brief_the_best_search_results_are_used(mem):
     chat, engine, calls, _briefs = mem
     engine.cfg.brief = False
@@ -346,3 +504,17 @@ async def test_memory_commands(mem, tmp_path, capsys):
     assert "No day summary for 2026-11-12 yet." in out  # the model resolved "dün"
     assert "memories (shared across this character's chats)" in out
     assert engine.repo.pinned_ids(engine.scope(chat.require_session())) == [1]
+
+
+async def test_direction_command(mem, tmp_path, capsys):
+    chat, _engine, _calls, briefs = mem
+    briefs.append({"about_past": False, "direction": "Ada is wary and keeps it short."})
+    paths = resolve_paths(tmp_path)
+    paths.ensure()
+    repl = Repl(chat, Translator("en"), paths, show_stats=False)
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        inp.send_text("/direction\rSelam\r/direction\r/quit\r")
+        await repl.run([])
+    out = ANSI.sub("", capsys.readouterr().out)
+    assert "No direction yet" in out
+    assert "Ada is wary and keeps it short." in out

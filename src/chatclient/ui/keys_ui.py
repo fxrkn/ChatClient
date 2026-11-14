@@ -62,11 +62,13 @@ class KeyCommands:
 
     async def set_key(self: Repl, name: str) -> None:
         pc = self.chat.registry.configs[name]
-        session: PromptSession[str] = PromptSession()
+        question = self.t("key_prompt", name=name)
         try:
-            key = (
-                await session.prompt_async(self.t("key_prompt", name=name), is_password=True)
-            ).strip()
+            if self.panel is not None:
+                key = (await self.panel.ask(question, password=True)).strip()
+            else:
+                session: PromptSession[str] = PromptSession()
+                key = (await session.prompt_async(question, is_password=True)).strip()
         except (KeyboardInterrupt, EOFError):
             key = ""
         if not key:

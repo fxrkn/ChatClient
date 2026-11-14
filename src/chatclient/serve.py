@@ -33,6 +33,7 @@ from chatclient.images import (
     set_card_look,
     workflow_file,
 )
+from chatclient.panel_data import panel_data
 from chatclient.providers.base import ProviderError, StreamEvent
 from chatclient.storage import Message, Session
 
@@ -42,7 +43,7 @@ PROTOCOL_VERSION = 1
 WORKER_IDLE_SECONDS = 1.0
 # allowed while a reply is being written (they change nothing)
 READ_ONLY = {"hello", "session.get", "history", "sessions.list", "characters.list",
-             "models.list", "draft", "picture.look"}  # fmt: skip
+             "models.list", "draft", "picture.look", "panel"}  # fmt: skip
 
 Starter = Callable[[TurnResult], AsyncIterator[StreamEvent]]
 
@@ -87,6 +88,7 @@ class Server:
             "content.set": self.content_set,
             "private.set": self.private_set,
             "draft": self.draft,
+            "panel": self.panel,
             "picture.setup": self.picture_setup,
             "picture.look": self.picture_look,
         }
@@ -236,6 +238,7 @@ class Server:
                 )  # fmt: skip
                 start = retry.start
             self.reply(rid, self.turn_info(result))
+            self.changed("reply")
         except asyncio.CancelledError:
             if self.running:  # stopped by "cancel": what was written is kept
                 self.reply(rid, self.turn_info(result))
@@ -255,6 +258,12 @@ class Server:
             "message": message_info(r.message) if r.message else None,
             "model": r.model, "cancelled": r.cancelled, "finish_reason": r.finish_reason,
             "refused": r.refused, "repetition": round(r.repetition, 3),
+            "direction": r.direction,
+            "direction_error": (
+                self.chat.memory.brief_error_for(self.chat.session.id if self.chat.session else None)
+                if self.chat.memory
+                else ""
+            ),
             "stats": {
                 "completion_tokens": out_tokens,
                 "prompt_tokens": r.usage.prompt_tokens if r.usage else None,
@@ -384,6 +393,16 @@ class Server:
         except Exception:
             log.exception("prefetch failed")
 
+    # ── the side panel ──────────────────────────────────────────────────────
+
+    def changed(self, why: str) -> None:
+        """Tell the client the panel is out of date (it asks again with "panel")."""
+        self.emit({"event": "panel", "why": why})
+
+    async def panel(self, p: dict[str, Any]) -> Any:
+        """What the terminal's side panel shows, as plain data."""
+        return panel_data(self.chat, self._last_picture()).as_dict()
+
     # ── pictures (ComfyUI) ──────────────────────────────────────────────────
 
     def workflow(self) -> Path:
@@ -427,6 +446,7 @@ class Server:
             "path": str(pic.path), "prompt": pic.prompt, "seconds": round(pic.seconds, 2),
             "message": message_info(reply) if reply else None,
         })  # fmt: skip
+        self.changed("picture")
 
     async def picture_setup(self, p: dict[str, Any]) -> Any:
         src = Path(str(p["path"]))
@@ -472,7 +492,9 @@ class Server:
                 did = False
             finally:
                 self.job_task = None
-            if not did:
+            if did:
+                self.changed("memory")  # the scene or the memories may have changed
+            else:
                 await asyncio.sleep(3)
 
     def interrupt_memory_job(self) -> None:

@@ -126,8 +126,9 @@ BRIEF_SCHEMA: dict[str, Any] = {
             },
         },
         "note": _STR,
+        "direction": _STR,
     },
-    "required": ["about_past", "dates", "relevant", "claims", "note"],
+    "required": ["about_past", "dates", "relevant", "claims", "note", "direction"],
 }  # fmt: skip
 
 
@@ -331,6 +332,7 @@ class Brief(BaseModel):
     relevant: list[str] = Field(default_factory=list)  # candidate ids: M12, Q34, D3
     claims: list[BriefClaim] = Field(default_factory=list)
     note: str = ""
+    direction: str = ""  # private prose for the character's next reply (not memory)
 
     @field_validator("relevant", mode="before")
     @classmethod
@@ -352,7 +354,7 @@ class Brief(BaseModel):
                     out.append((a, b) if a <= b else (b, a))
         return out[:3]
 
-    @field_validator("note", mode="before")
+    @field_validator("note", "direction", mode="before")
     @classmethod
     def _note(cls, v: Any) -> str:
         return "" if v is None else str(v).strip()
@@ -378,10 +380,36 @@ def brief_prompt(
     recent: Sequence[tuple[str, str, str]],
     message: str,
     candidates: Sequence[tuple[str, str]],
+    profile: str = "",
+    initiative: str = "",
+    scene: str = "",
+    content: str = "",
 ) -> list[ChatMessage]:
+    """``profile`` (who the character is), ``initiative`` (a hint), ``scene`` and
+    ``content`` let the brief also write ``direction``; without a profile it is left empty."""
     cands = "\n".join(f"[{cid}] {text}" for cid, text in candidates) or "(none found)"
+    if profile:
+        about = f"\nAbout {char} (for the direction):\n{profile}\n"
+        if initiative:
+            about += f"Initiative hint (weigh it, it is not a rule): {initiative}\n"
+        if scene:
+            about += f"Current scene: {scene}\n"
+        if content:
+            about += f"Content setting: {content}\n"
+        direction_rule = (
+            f"- direction: a private note, 2-4 sentences of plain prose about THIS moment, for "
+            f"{char}'s next reply. Say what is happening now; what {user} seems to want right "
+            f"now (quick banter, an answer, a scene); how {char}, being who they are and with "
+            f"their own wants, would naturally respond (they may disagree, refuse, change the "
+            f"subject or not care); roughly how long the reply should be; and the one or two "
+            f"details from the story that matter now and must not be lost. Never write {char}'s "
+            f"reply or {user}'s words, and no stock phrases."
+        )
+    else:
+        about = ""
+        direction_rule = "- direction: leave empty."
     task = f"""You prepare a memory brief for {char}'s next reply in a chat with {user}.
-Calendar (newest first):
+{about}Calendar (newest first):
 {today}
 
 Recent conversation:
@@ -400,7 +428,8 @@ Return ONLY a JSON object:
   "dates": [{{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}],
   "relevant": ["M12", "Q34"],
   "claims": [{{"claim": "...", "status": "supported|contradicted|unsupported", "evidence": ["Q34"]}}],
-  "note": "one short correction about the shared past, or empty"}}
+  "note": "one short correction about the shared past, or empty",
+  "direction": "private note for the next reply, or empty"}}
 
 - about_past: does the message ask about or take for granted something from the shared past?
   (true even if that thing never actually happened)
@@ -412,7 +441,8 @@ Return ONLY a JSON object:
   otherwise; unsupported = nothing known backs it (then it probably did not happen).
 - note: only when the message gets the shared past wrong: one short fact that sets it
   straight, e.g. "That trip never happened; say so gently." Never about what {char}
-  wants, prefers or should do next, and never steer the story: memory only. Usually empty."""
+  wants, prefers or should do next, and never steer the story: memory only. Usually empty.
+{direction_rule}"""
     return [ChatMessage("system", SYSTEM), ChatMessage("user", task)]
 
 

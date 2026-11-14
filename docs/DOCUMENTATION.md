@@ -28,7 +28,11 @@ lists the commands and **Ctrl+P** opens a searchable command palette.
 | Ctrl+C | stop the reply being written (what was written is kept) |
 | Alt+← / Alt+→ (or Ctrl+← / Ctrl+→), on an empty line | previous / next version of the last reply; past the newest, a new one is written |
 | Ctrl+P | command palette |
+| Ctrl+L | redraw the screen (panel layout: the picture comes back too) |
 | Ctrl+D or `/quit` | exit |
+| mouse wheel, PageUp / PageDown | scroll the chat; older messages come in at the top (panel layout) |
+| mouse wheel over the panel, Alt+PageUp / Alt+PageDown | scroll the side panel when it is taller than the screen (panel layout) |
+| drag the `│` between chat and panel, Alt+, / Alt+. | make the side panel wider or narrower (panel layout; also `/layout width <n>`) |
 
 An unsent message is kept as a draft and comes back the next time you open the chat.
 Actions written between asterisks (`*smiles*`) are shown in their own style.
@@ -126,6 +130,7 @@ claims about the past, and keeps the story so far once early messages no longer 
 | `/day [yesterday\|12 October…]` | what happened on a day |
 | `/summary` | the story so far |
 | `/scene [clear]` | the current scene: place, time, relationship |
+| `/direction` | the private note the last reply was written under. It is written by the utility model with the memory brief, so private chats get it too (with no memory search and nothing stored); with memory switched off there is none. When the brief keeps failing (for example the utility model is out of credits) a warning appears once after a reply, and `/direction` says why |
 
 After a long break the character is told once how much time has passed.
 
@@ -172,10 +177,29 @@ drawn in them, never leave in an export.
 | Command | Does |
 |---|---|
 | `/theme [name]` | colour theme |
+| `/layout [inline\|panel\|width <n>]` | `inline`: one column, like a normal terminal program; `panel`: full screen, the chat on the left and the character beside it; `width <n>`: the panel's width in columns (saved) |
 | `/lang en\|tr\|auto` | interface language |
 | `/clear` | clear the screen (nothing is deleted) |
 | `/setup` | run the first-time setup again |
 | `/help` | all commands |
+
+**The panel layout** (`/layout panel`, or `layout = "panel"` under `[ui]` in
+`config.toml`) shows next to the chat: the latest picture, the character's name, age
+and personality, what is happening now (place, time, what you are doing, mood, how
+you two stand) and the latest memories. It is updated after every reply and whenever
+memory learns something new. The mouse wheel or PageUp / PageDown scroll the chat;
+scrolling past the top brings in older messages. When the panel is taller than the
+screen, a hint (↓) says so; the wheel over the panel or Alt+PageUp / Alt+PageDown
+scroll it (a sharp picture is shown while it is fully in view). To copy text, drag over it with
+the left mouse button: the selection is highlighted and copied to the clipboard when
+you let go (a short note appears in the status line; a click clears it). Questions (the character wizard, lists to pick from) are
+asked in the input box. In a terminal that draws pictures (Sixel) the picture is
+shown sharp; elsewhere as a small coloured preview. The panel's width is set by
+dragging the `│` between chat and panel with the mouse, by Alt+, (narrower) and Alt+.
+(wider), or by `/layout width <n>`; the choice is saved (`panel_width` under `[ui]` is
+the default). The panel is at least 20 columns wide and the chat keeps at least 40; in
+a terminal narrower than 80 columns the chat is shown alone. `/pic show`
+opens the full picture in the image viewer.
 
 ## Starting the app
 

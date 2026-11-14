@@ -48,13 +48,14 @@ def scripted(monkeypatch, replies):
     return prompts
 
 
-async def test_the_story_note_changes_every_turn(chat, monkeypatch):
+async def test_no_fresh_note_is_injected_any_more(chat, monkeypatch):
     char = chat.store.add_character("ai", ALPHA)
     chat.new_session(model="echo:echo", character_id=char.id)
     prompts = scripted(monkeypatch, [LOOP, "We walk out into the cold night air together."])
     await say(chat, "hello")
     await say(chat, "let's go")
-    assert 'Your previous reply began "My breath hitches' in prompts[-1]
+    # variety is the director's job now; only the one-time rewrite quotes a reply
+    assert "My breath hitches" not in prompts[-1]
 
 
 async def test_a_copied_reply_is_flagged(chat, monkeypatch):

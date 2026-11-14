@@ -90,6 +90,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{old} declined; {new} is writing this reply instead (the declined one: /prev).",
         "tr": "{old} reddetti; bu yanıtı {new} yazıyor (reddedilen sürüm: /prev).",
     },
+    "director_failing": {
+        "en": "The director isn't working: {error} (/utility to change the model).",
+        "tr": "Yönlendirme çalışmıyor: {error} (modeli değiştirmek için /utility).",
+    },
+    "direction_why_failed": {
+        "en": "No direction: the last brief failed ({error}). /utility changes the model.",
+        "tr": "Yönlendirme yok: son brif başarısız oldu ({error}). Modeli /utility ile değiştirin.",
+    },
+    "direction_why_memory_off": {
+        "en": "No direction: memory is switched off, and the direction comes with its brief.",
+        "tr": "Yönlendirme yok: hafıza kapalı, yönlendirme brifle birlikte gelir.",
+    },
+    "direction_why_brief_off": {
+        "en": "No direction: the brief is switched off ([memory] brief = false).",
+        "tr": "Yönlendirme yok: brif kapalı ([memory] brief = false).",
+    },
+    "direction_why_no_character": {
+        "en": "No direction: there is no character in this chat.",
+        "tr": "Yönlendirme yok: bu sohbette karakter yok.",
+    },
     "memory_struggling": {
         "en": "Memory work keeps failing ({error}). The model may not manage it: set another "
         "one as [models] utility in the config, or see /memory status.",
@@ -637,6 +657,59 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Your unsent message was restored.",
         "tr": "Gönderilmemiş mesajınız geri yüklendi.",
     },
+    "layout_current": {
+        "en": "Layout: {layout}  (/layout inline · one column | /layout panel · chat + character panel)",
+        "tr": "Düzen: {layout}  (/layout inline · tek sütun | /layout panel · sohbet + karakter paneli)",
+    },
+    "layout_set": {"en": "Layout: {layout}.", "tr": "Düzen: {layout}."},
+    "panel_width_current": {
+        "en": "Panel width: {n} columns  (/layout width <n> · drag the │ · Alt+, narrower · Alt+. wider)",
+        "tr": "Panel genişliği: {n} sütun  (/layout width <n> · │ çizgisini sürükleyin · Alt+, daralt · Alt+. genişlet)",
+    },
+    "panel_width_set": {"en": "Panel width: {n} columns.", "tr": "Panel genişliği: {n} sütun."},
+    "panel_width_usage": {"en": "/layout width <columns>", "tr": "/layout width <sütun>"},
+    "panel_copied": {
+        "en": "Copied {n} characters to the clipboard.",
+        "tr": "{n} karakter panoya kopyalandı.",
+    },
+    "panel_copied_terminal": {
+        "en": "Sent {n} characters to the clipboard via the terminal.",
+        "tr": "{n} karakter terminal aracılığıyla panoya gönderildi.",
+    },
+    "panel_copy_failed": {
+        "en": "Could not copy to the clipboard.",
+        "tr": "Panoya kopyalanamadı.",
+    },
+    "layout_failed": {
+        "en": "The panel layout could not start ({error}); using the inline layout.",
+        "tr": "Panel düzeni başlatılamadı ({error}); tek sütun düzenine geçildi.",
+    },
+    "panel_pick": {
+        "en": "{title} — a number or part of a name (Enter: cancel)",
+        "tr": "{title} — bir numara ya da adın bir kısmı (Enter: vazgeç)",
+    },
+    "panel_pick_again": {
+        "en": "{n} matches; type a number.",
+        "tr": "{n} eşleşme var; bir numara yazın.",
+    },
+    "panel_scrolled": {"en": "scrolled back · PageDown", "tr": "geride · PageDown"},
+    "panel_side_below": {
+        "en": "more · wheel or Alt+PageDown",
+        "tr": "devamı var · tekerlek ya da Alt+PageDown",
+    },
+    "panel_side_above": {
+        "en": "above · wheel or Alt+PageUp",
+        "tr": "yukarıda · tekerlek ya da Alt+PageUp",
+    },
+    "panel_older": {"en": "older messages: scroll up", "tr": "daha eski mesajlar: yukarı kaydırın"},
+    "panel_personality": {"en": "Personality", "tr": "Kişilik"},
+    "panel_scene": {"en": "Now", "tr": "Şu an"},
+    "panel_memories": {"en": "Remembers", "tr": "Hatırladıkları"},
+    "panel_location": {"en": "place", "tr": "yer"},
+    "panel_time": {"en": "time", "tr": "zaman"},
+    "panel_activity": {"en": "doing", "tr": "olay"},
+    "panel_mood": {"en": "mood", "tr": "ruh hâli"},
+    "panel_relationship": {"en": "between you", "tr": "aranızda"},
     "setup_title": {"en": "Welcome to ChatClient!", "tr": "ChatClient'a hoş geldiniz!"},
     "setup_intro": {
         "en": "Let's get you chatting in a minute. You can rerun this anytime with /setup.",
@@ -750,6 +823,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "(no brief: the utility model is off or unavailable; showing search results)",
         "tr": "(brif yok: yardımcı model kapalı ya da ulaşılamıyor; arama sonuçları gösteriliyor)",
     },
+    "direction_none": {
+        "en": "No direction yet (it comes with the memory brief, in a character chat).",
+        "tr": "Henüz yönlendirme yok (karakter sohbetinde hafıza brifiyle birlikte gelir).",
+    },
     "scene_none": {
         "en": "No scene recorded yet (it updates as you chat).",
         "tr": "Henüz sahne kaydı yok (sohbet ettikçe güncellenir).",
@@ -829,11 +906,13 @@ COMMAND_DOCS: tuple[CommandDoc, ...] = (
     CommandDoc("/recall", "<text>", "test what would be remembered, e.g. /recall yesterday", "neyin hatırlanacağını dene, örn. /recall dün", "<metin>"),
     CommandDoc("/day", "", "what happened on a day (/day yesterday, /day 12 October)", "bir günde ne oldu (/day dün, /day 12 Ekim)"),
     CommandDoc("/summary", "", "the story so far", "hikâye şimdiye kadar"),
+    CommandDoc("/direction", "", "the private note the last reply was written under", "son yanıtın yazıldığı özel yönlendirme notu"),
     CommandDoc("/scene", "", "current scene: place, time, mood, relationship", "mevcut sahne: yer, zaman, ruh hâli, ilişki"),
     CommandDoc("/persona", "", "tell characters who you are (/persona set · export · import <file>)", "karakterlere kim olduğunuzu anlatın (/persona set · export · import <dosya>)"),
     CommandDoc("/system", "", "show or set this session's system prompt", "bu oturumun sistem istemini göster/ayarla"),
     CommandDoc("/set", "", "show or set generation parameters (/set temperature 0.9)", "üretim parametrelerini göster/ayarla (/set temperature 0.9)"),
     CommandDoc("/theme", "", "show or switch the colour theme", "renk temasını göster/değiştir"),
+    CommandDoc("/layout", "[inline|panel|width <n>]", "one column, or the chat with a character panel beside it", "tek sütun ya da sohbetin yanında karakter paneli"),
     CommandDoc("/private", "[on|off]", "private session: no memory, no indexing", "gizli oturum: hafıza ve indeksleme yok"),
     CommandDoc("/content", "[standard|mature]", "content setting (mature: adult fiction, no lectures)", "içerik ayarı (mature: yetişkin kurgu, ahlak dersi yok)"),
     CommandDoc("/fallback", "[provider:model|off]", "model that rewrites declined replies", "reddedilen yanıtları yeniden yazan model"),

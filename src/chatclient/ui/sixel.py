@@ -16,6 +16,28 @@ COLORS = 128
 
 
 _asked: bool | None = None  # what the terminal answered at start-up (None: not asked)
+_cell: tuple[int, int] | None = None  # one character cell in pixels (width, height)
+# When the terminal doesn't say: on the small side, so a picture never spills over
+# the text around it (a little too small is harmless).
+GUESS_CELL = (7, 14)
+# Cell size first (terminals that don't know it stay silent), then DA1, whose answer
+# always comes and ends the reading.
+QUERY = "\x1b[16t\x1b[c"
+
+
+def cell_size() -> tuple[int, int]:
+    return _cell or GUESS_CELL
+
+
+def parse_cell(reply: str) -> tuple[int, int] | None:
+    """The answer to ``ESC [16t`` (character cell size): ``ESC [6;<height>;<width>t``."""
+    import re
+
+    m = re.search(r"\x1b\[6;(\d+);(\d+)t", reply)
+    if not m:
+        return None
+    h, w = int(m.group(1)), int(m.group(2))
+    return (w, h) if 2 <= w <= 200 and 2 <= h <= 400 else None
 
 
 def supported(setting: str = "auto") -> bool:
@@ -46,9 +68,10 @@ def has_sixel(da1_reply: str) -> bool:
 
 
 def ask_terminal(timeout: float = 0.4) -> None:
-    """Ask the terminal once, before the prompt starts reading input. Whatever goes
+    """Ask the terminal once, before the prompt starts reading input: can it draw
+    (DA1), and how big is a character cell (for pictures in the panel)? Whatever goes
     wrong (not a terminal, no answer) leaves the old guess in place."""
-    global _asked
+    global _asked, _cell
     import sys
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -57,8 +80,9 @@ def ask_terminal(timeout: float = 0.4) -> None:
         reply = _read_da1_windows(timeout) if os.name == "nt" else _read_da1_posix(timeout)
     except Exception:
         return
-    if reply:
+    if "[?" in reply:  # a DA1 answer: only then do we know what the terminal can do
         _asked = has_sixel(reply)
+    _cell = parse_cell(reply) or _cell  # a lone cell-size answer still helps
 
 
 def _read_da1_windows(timeout: float) -> str:
@@ -76,7 +100,7 @@ def _read_da1_windows(timeout: float) -> str:
     # VT input on (the answer arrives as input), line input and echo off
     kernel32.SetConsoleMode(handle, (mode.value | 0x0200) & ~0x0006)
     try:
-        sys.stdout.write("\x1b[c")
+        sys.stdout.write(QUERY)
         sys.stdout.flush()
         reply, deadline = "", time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -101,7 +125,7 @@ def _read_da1_posix(timeout: float) -> str:
     old = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        sys.stdout.write("\x1b[c")
+        sys.stdout.write(QUERY)
         sys.stdout.flush()
         reply = ""
         while select.select([fd], [], [], timeout)[0]:

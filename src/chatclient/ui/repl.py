@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import shlex
 import signal
 import sys
 import time
 from collections.abc import AsyncIterator, Callable, Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application.current import get_app
@@ -57,7 +58,15 @@ from chatclient.ui.render import BOLD, RESET, StreamWriter, reading_width
 from chatclient.ui.setup_ui import SetupCommands
 from chatclient.ui.tools_ui import ToolCommands
 
+if TYPE_CHECKING:
+    from chatclient.ui.panel import PanelView
+
+log = logging.getLogger(__name__)
+
 THEME_KEY = "ui_theme"
+LAYOUT_KEY = "ui_layout"
+PANEL_WIDTH_KEY = "ui_panel_width"
+LAYOUTS = ("inline", "panel")
 INDENT = "  "
 CLEAR_LINE = "\x1b[2K"
 PALETTE = "\x00palette"  # returned by the prompt when Ctrl+P is pressed
@@ -147,6 +156,7 @@ class Repl(
         self.running = True
         self.last_result: TurnResult | None = None
         self.memory_warned = False
+        self.brief_warned = False  # the "director isn't working" hint was shown
         self.pic_task: asyncio.Task[None] | None = None  # /pic drawing in the background
         self.streaming = False  # a reply is being generated (memory jobs pause)
         self.job_task: asyncio.Future[bool] | None = None
@@ -155,6 +165,9 @@ class Repl(
         self.ui = chat.config.ui
         self.theme: Theme = self.load_theme()
         self.prompt_session: PromptSession[str] | None = None
+        self.panel: PanelView | None = None  # the panel layout, while it is on screen
+        self.layout_changed = False  # /layout: leave the current layout for the other
+        self.stream_task: asyncio.Future[None] | None = None  # the reply being written
 
     # ── theme ───────────────────────────────────────────────────────────────
 
@@ -183,6 +196,9 @@ class Repl(
                 "picker.item": ptk_color(th.text),
                 "picker.selected": f"{ptk_color(th.accent)} bold",
                 "picker.hint": ptk_color(th.dim),
+                "panel": ptk_color(th.text),
+                "panel.dim": ptk_color(th.dim),
+                "panel.border": ptk_color(th.dim),
             }
         )
 
@@ -190,6 +206,60 @@ class Repl(
         self.theme = self.load_theme()
         if self.prompt_session is not None:
             self.prompt_session.style = self.ptk_style()
+        if self.panel is not None:
+            self.panel.app.style = self.ptk_style()
+
+    # ── layout ──────────────────────────────────────────────────────────────
+
+    def layout(self) -> str:
+        """/layout (saved in the app) wins over [ui] layout."""
+        saved = self.chat.store.kv_get(LAYOUT_KEY)
+        return saved if saved in LAYOUTS else self.ui.layout
+
+    def panel_width(self) -> int:
+        """/layout width (saved in the app) wins over [ui] panel_width."""
+        saved = self.chat.store.kv_get(PANEL_WIDTH_KEY)
+        return int(saved) if saved and saved.isdigit() else self.ui.panel_width
+
+    def set_panel_width(self, width: int) -> None:
+        self.chat.store.kv_set(PANEL_WIDTH_KEY, str(width))
+
+    def layout_command(self, arg: str) -> None:
+        value = arg.strip().lower()
+        if not value:
+            self.info(self.t("layout_current", layout=self.layout()))
+            return
+        if value.split()[0] == "width":
+            self.width_command(value.split()[1:])
+            return
+        if value not in LAYOUTS:
+            raise ChatError("/layout inline|panel|width <n>")
+        self.chat.store.kv_set(LAYOUT_KEY, value)
+        if value != ("panel" if self.panel is not None else "inline"):
+            self.layout_changed = True  # the main loop switches after this command
+        self.info(self.t("layout_set", layout=value))
+
+    def width_command(self, args: list[str]) -> None:
+        """/layout width [n]: the side panel's width in columns (a drag or Alt+, Alt+. too)."""
+        if not args:
+            self.info(self.t("panel_width_current", n=self.panel_width()))
+            return
+        if len(args) > 1 or not args[0].isdigit():
+            raise ChatError(self.t("panel_width_usage"))
+        if self.panel is not None:
+            self.panel.resize(int(args[0]))  # clamped to what fits; saved
+            self.info(self.t("panel_width_set", n=self.panel.side_width()))
+        else:  # the other layout: saved now, clamped to the screen when the panel opens
+            from chatclient.ui.panel import MIN_SIDE_WIDTH
+
+            self.set_panel_width(max(MIN_SIDE_WIDTH, int(args[0])))
+            self.info(self.t("panel_width_set", n=self.panel_width()))
+
+    def text_width(self) -> int:
+        """How wide replies are written: the reading width, inside the chat column."""
+        if self.panel is not None:
+            return max(20, min(self.ui.max_width, self.panel.chat_width() - 1))
+        return reading_width(self.ui.max_width)
 
     # ── output helpers ──────────────────────────────────────────────────────
 
@@ -219,7 +289,7 @@ class Repl(
         th = self.theme
         return StreamWriter(
             out,
-            width=reading_width(self.ui.max_width),
+            width=self.text_width(),
             margin=0,
             indent=INDENT,
             base=ansi(th.text),
@@ -242,6 +312,8 @@ class Repl(
         return character_color(char.name, self.theme, card_color(char.card))
 
     async def pick(self, title: str, items: list[PickItem], current: Any = None) -> Any:
+        if self.panel is not None:
+            return await self.panel.pick(title, items, current)
         return await pick(
             title, items, current=current, footer=self.t("picker_footer"), style=self.ptk_style()
         )
@@ -267,21 +339,101 @@ class Repl(
     # ── main loop ───────────────────────────────────────────────────────────
 
     def banner(self) -> None:
-        if self.ui.clear_on_start:
+        if self.ui.clear_on_start and self.panel is None:
             self.console.clear()
-        width = reading_width(self.ui.max_width)
         self.heading(f"ChatClient {__version__}")
         self.info(self.t("welcome"))
-        self.console.print("─" * width, style=self.style("dim"), markup=False)
+        self.console.print("─" * self.text_width(), style=self.style("dim"), markup=False)
 
-    async def run(self, startup_notes: list[str]) -> None:
+    async def intro(self, startup_notes: list[str] | None) -> None:
+        """What is shown when a layout opens: everything at start-up, the recent
+        conversation after a switch."""
+        if startup_notes is None:
+            self.print_session_header()
+            return
         self.banner()
         for note in startup_notes:
             self.info(note)
         self.print_session_header()
         if self.chat.require_session().model is None:
             self.warn(self.t("no_model"))
+        if self.needs_setup():
+            await self.setup_wizard()
+        elif self.load_draft():
+            self.info(self.t("draft_restored"))
 
+    def completer(self) -> SlashCompleter:
+        return SlashCompleter(lambda: self.known_models, self.char_names, self.key_providers)
+
+    async def run(self, startup_notes: list[str]) -> None:
+        worker = asyncio.ensure_future(self.memory_worker()) if self.chat.memory else None
+        notes: list[str] | None = startup_notes
+        try:
+            while self.running:
+                self.layout_changed = False
+                if self.layout() == "panel" and self.panel_possible():
+                    try:
+                        await self.run_panel(notes)
+                    except Exception as e:  # the screen can't do it: carry on in one column
+                        log.exception("panel layout failed")
+                        self.chat.store.kv_set(LAYOUT_KEY, "inline")
+                        self.warn(self.t("layout_failed", error=f"{type(e).__name__}: {e}"))
+                        self.layout_changed = False
+                        await self.run_inline(notes)
+                else:
+                    await self.run_inline(notes)
+                notes = None
+        finally:
+            if worker is not None:
+                worker.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await worker
+
+    def panel_possible(self) -> bool:
+        """The panel needs a real terminal (not a pipe)."""
+        return sys.stdout.isatty() and sys.stdin.isatty()
+
+    async def run_panel(self, notes: list[str] | None) -> None:
+        """Full screen: the chat on the left, the character on the right."""
+        from chatclient.ui.panel import PanelView
+
+        view = PanelView(self, self.completer())  # built before stdout is redirected
+        view.input.text = self.load_draft()
+
+        def typed(buf: Any) -> None:
+            if view.question or view._password:  # an answer (a key!) is not a draft
+                return
+            self.save_draft(buf.text)
+            self.schedule_prefetch(buf.text)
+
+        view.input.on_text_changed += typed
+        real_stdout = sys.stdout
+
+        async def opening() -> None:
+            view.refresh()
+            await self.intro(notes)
+
+        try:
+            self.panel = view
+            sys.stdout = view.log  # type: ignore[assignment]
+            self.console.width = view.chat_width()
+            view.busy = asyncio.ensure_future(view._run(opening()))
+            await view.app.run_async()
+        finally:
+            if view.is_busy():
+                view.busy.cancel()  # type: ignore[union-attr]
+                with contextlib.suppress(BaseException):
+                    await view.busy  # type: ignore[misc]
+            sys.stdout = real_stdout
+            self.panel = None
+            self.console.width = None  # type: ignore[assignment]  # back to the terminal's
+        if self.layout_changed:
+            self.console.clear()
+
+    async def run_inline(self, notes: list[str] | None) -> None:
+        """One column, like a normal terminal program."""
+        if notes is None:
+            self.console.clear()
         kb = KeyBindings()
 
         @kb.add("enter")
@@ -312,9 +464,7 @@ class Repl(
 
         session: PromptSession[str] = PromptSession(
             history=FileHistory(str(self.paths.history_file)),
-            completer=SlashCompleter(
-                lambda: self.known_models, self.char_names, self.key_providers
-            ),
+            completer=self.completer(),
             complete_while_typing=True,
             key_bindings=kb,
             multiline=True,
@@ -327,23 +477,13 @@ class Repl(
         session.default_buffer.on_text_changed += lambda buf: self.save_draft(buf.text)
         # …and memory for it is prepared while it's being typed.
         session.default_buffer.on_text_changed += lambda buf: self.schedule_prefetch(buf.text)
-        if self.needs_setup():
-            await self.setup_wizard()
-        elif self.load_draft():
-            self.info(self.t("draft_restored"))
-        worker = asyncio.ensure_future(self.memory_worker()) if self.chat.memory else None
-        try:
-            await self.main_loop(session)
-        finally:
-            if worker is not None:
-                worker.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await worker
+        await self.intro(notes)
+        await self.main_loop(session)
 
     async def main_loop(self, session: PromptSession[str]) -> None:
         prompt = FormattedText([("class:prompt-arrow", "› ")])
         prefill = ""
-        while self.running:
+        while self.running and not self.layout_changed:
             try:
                 line = await session.prompt_async(prompt, default=prefill or self.load_draft())
             except KeyboardInterrupt:
@@ -361,22 +501,30 @@ class Repl(
                 except ChatError as e:
                     self.warn(str(e))
                 continue
-            self.save_draft("")
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                if line.startswith("/"):
-                    await self.handle_command(line)
-                else:
-                    await self.settle_prefetch(line)
-                    await self.reply(lambda r, text=line: self.chat.send(text, r))
-            except ChatError as e:
-                self.warn(str(e))
-            except ProviderError as e:
-                self.error(str(e))
-            except ValueError as e:
-                self.warn(str(e))
+            await self.process_line(line)
+
+    async def process_line(self, line: str) -> None:
+        """One line typed by the user: a command, or a message for the character."""
+        self.save_draft("")
+        line = line.strip()
+        if not line:
+            return
+        try:
+            if line.startswith("/"):
+                if self.panel is not None:  # the panel clears the input box: echo what ran
+                    self.info(f"› {line}")
+                await self.handle_command(line)
+            else:
+                if self.panel is not None:  # inline keeps the typed line; the panel does not
+                    self.write_message(self.user_label(), self.theme.user, line)
+                await self.settle_prefetch(line)
+                await self.reply(lambda r, text=line: self.chat.send(text, r))
+        except ChatError as e:
+            self.warn(str(e))
+        except ProviderError as e:
+            self.error(str(e))
+        except ValueError as e:
+            self.warn(str(e))
 
     def _draft_key(self) -> str | None:
         return f"draft:{self.chat.session.id}" if self.chat.session else None
@@ -392,11 +540,22 @@ class Repl(
     def print_session_header(self) -> None:
         s = self.chat.require_session()
         count = len(self.chat.history())
+        fresh = False  # the chat area starts over: the history below is its top
+        if self.panel is not None and self.panel.shown_session != s.id:
+            self.reset_chat_area()
+            fresh = True
         self.info(
             self.t("session_opened", id=s.id, title=s.title or self.t("untitled"), count=count)
         )
         if count:
-            self.show_history(6)
+            self.show_history(6, top=fresh)
+
+    def reset_chat_area(self) -> None:
+        """Another conversation: the panel's chat area starts empty, nothing above it."""
+        if self.panel is not None:
+            self.panel.log.clear()
+            self.panel.hidden_before = 0
+            self.panel.shown_session = self.chat.require_session().id
 
     # ── free-model fallback ─────────────────────────────────────────────────
 
@@ -561,6 +720,7 @@ class Repl(
                     writer.write(ev.text)
 
         task = asyncio.ensure_future(consume())
+        self.stream_task = task  # the panel's Ctrl+C stops it (no SIGINT in raw mode)
         loop = asyncio.get_running_loop()
 
         def on_sigint(signum: int, frame: object) -> None:
@@ -607,6 +767,13 @@ class Repl(
             self.memory_warned = True  # once per run: a hint, not nagging
             hint = self.t("memory_struggling", error=engine.last_failure)
             out.write(f"{INDENT}{warn}{hint}{RESET}\n")
+        if engine is not None:
+            if engine.brief_struggling and not self.brief_warned:
+                self.brief_warned = True  # once per failing stretch, again after a recovery
+                hint = self.t("director_failing", error=engine.last_brief_error)
+                out.write(f"{INDENT}{warn}{hint}{RESET}\n")
+            elif not engine.brief_struggling:
+                self.brief_warned = False
         out.write("\n")
         out.flush()
 
@@ -650,9 +817,16 @@ class Repl(
             case "/quit" | "/exit" | "/q":
                 self.running = False
             case "/clear" | "/cls":
-                self.console.clear()
+                if self.panel is not None:
+                    self.panel.log.clear()
+                    self.panel.hidden_before = 0  # nothing above a cleared screen
+                else:
+                    self.console.clear()
+            case "/layout":
+                self.layout_command(arg)
             case "/new":
                 s = self.chat.new_session(title=arg)
+                self.reset_chat_area()
                 self.info(self.t("new_session", id=s.id))
                 if s.model is None:
                     self.warn(self.t("no_model"))
@@ -732,6 +906,8 @@ class Repl(
                 self.scene_command(arg)
             case "/summary":
                 self.summary_command()
+            case "/direction":
+                self.direction_command()
             case "/day":
                 await self.day_command(arg)
             case "/free":
@@ -854,24 +1030,33 @@ class Repl(
         target = self.chat.store.get_session(sid)
         if target is None:
             raise ChatError(f"session {sid} not found")
-        confirm: PromptSession[str] = PromptSession()
-        answer = await confirm.prompt_async(
-            self.t("confirm_delete", id=sid, title=target.title or self.t("untitled"))
-        )
+        question = self.t("confirm_delete", id=sid, title=target.title or self.t("untitled"))
+        if self.panel is not None:
+            answer = await self.panel.ask(question)
+        else:
+            confirm: PromptSession[str] = PromptSession()
+            answer = await confirm.prompt_async(question)
         if answer.strip().lower() not in ("y", "yes", "e", "evet"):
             self.info(self.t("aborted"))
             return
         was_current = self.chat.require_session().id == sid
         self.chat.store.delete_session(sid)
-        self.info(self.t("deleted", id=sid))
         if was_current:
             self.chat.resume_or_create()
-            self.print_session_header()
+            self.print_session_header()  # (the panel starts its chat area over here)
+        self.info(self.t("deleted", id=sid))
 
-    def show_history(self, n: int) -> None:
+    def show_history(self, n: int, top: bool = False) -> None:
+        """top: the chat area was just emptied, so the rest is above (panel: scroll up).
+        Not for /history, which only repeats what is shown."""
         msgs = self.chat.history(limit=n)
         if msgs:
             sys.stdout.write("\n")
+        if self.panel is not None and top:
+            self.panel.hidden_before = max(0, len(self.chat.history()) - len(msgs))
+        self.write_messages(msgs)
+
+    def write_messages(self, msgs: list[Any]) -> None:
         you = self.user_label()
         pictures = self.history_pictures(msgs)
         for m in msgs:

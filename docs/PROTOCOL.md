@@ -82,6 +82,8 @@ Result of a streaming request:
               "created_at": "2026-11-14T10:00:00+00:00", "meta": {}},
   "model": "ollama:x", "cancelled": false, "finish_reason": "stop",
   "refused": false, "repetition": 0.02,
+  "direction": "Lena is teasing; Kai wants a quick answer. Keep it short.",
+  "direction_error": "",
   "stats": {"completion_tokens": 54, "prompt_tokens": 2870, "seconds": 2.1,
             "first_token_seconds": 0.6, "recalled": 2, "conflicts": 0, "dropped_context": 0},
   "alternatives": {"count": 2, "index": 1},
@@ -89,6 +91,9 @@ Result of a streaming request:
 }
 ```
 
+`direction` is the private note the memory brief wrote for this reply (empty when there was
+none: no character, memory off, or the brief failed); it is for display only. `direction_error` is why the latest brief failed (for example
+`openrouter: HTTP 402 …`), empty after a successful one; show it when `direction` is empty.
 `message` may be `null` if nothing was written. `alternatives.index` is 0-based.
 `memory.struggling` turns true when background memory work keeps failing (usually the
 model can't manage it); worth telling the user once, with `error`.
@@ -123,6 +128,39 @@ A session:
 ```
 
 (`content` only on the current session.)
+
+## Side panel
+
+`panel` (allowed while a reply is being written) returns what the terminal app shows
+beside the chat, so another front end can draw the same layout:
+
+```json
+{"picture": "C:\\...\\characters\\Lena\\images\\20261114-131502-1a2b3c4d.png",
+ "name": "Lena", "title": "Lena", "age": 27, "content": "mature", "private": false,
+ "personality": ["warm", "curious"],
+ "scene": {"location": "a harbour café", "time": "dusk", "mood": "relaxed"},
+ "memories": [{"content": "Sam likes tea.", "pinned": true, "kind": "preference"}],
+ "model": "ollama:x"}
+```
+
+- `picture`: absolute path of the newest picture of this conversation, or `null`.
+- Without a character: `name`, `age` and `picture` are `null` and `personality` is `[]`;
+  show `title` instead.
+- `scene` has only the filled keys of `location`, `time`, `activity`, `mood`,
+  `relationship`. `memories` are the latest 5 (pinned first); always `[]` in private chats.
+- `personality` is at most 4 short lines (labels removed); `age` is the age the card states.
+
+The server sends a notification (no `id`) when the panel is out of date; call `panel`
+again, ideally not more than once per notification burst:
+
+```
+← {"event":"panel","why":"reply"}     after a reply (also the scene may change soon)
+← {"event":"panel","why":"memory"}    a background memory job finished (scene, memories)
+← {"event":"panel","why":"picture"}   a picture is ready
+```
+
+Also call `panel` after `session.new`, `session.open`, `model.set`, `content.set` and
+`private.set`, which change it without a notification.
 
 ## Pictures (ComfyUI)
 

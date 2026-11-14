@@ -92,6 +92,10 @@ class UIConfig(_Strict):
     style_speech: bool = True  # "quoted speech" in a slightly brighter colour
     character_colors: bool = True  # each character's name in its own colour
     typing_indicator: bool = True  # "<name> is typing… 2.1s" while waiting for a reply
+    # inline: one column, like a normal terminal; panel: full screen, the chat on the left
+    # and the character (picture, personality, scene, memories) on the right (/layout)
+    layout: Literal["inline", "panel"] = "inline"
+    panel_width: int = Field(default=34, ge=20, le=80)  # columns of the side panel
 
     @field_validator("theme")
     @classmethod

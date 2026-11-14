@@ -17,14 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from chatclient.characters import (
     DEFAULT_USER_NAME,
-    INITIATIVE_RULES,
     MATURE_RULES,
     Card,
     Character,
     apply_macros,
     builtin_cards,
     card_content,
-    card_initiative,
     compile_reminder,
     compile_system_prompt,
     greeting,
@@ -59,6 +57,8 @@ REMOVED_BUILTINS_KEY = "removed_builtin_characters"
 CONTENT_KEY = "content_mode"
 CONTENT_MODES = ("standard", "mature")
 FALLBACK_KEY = "refusal_fallback"
+
+DIRECTION_HEADER = "Private direction for this one reply only (never quote or mention it): "
 
 CONTINUE_NOTE = (
     "[Continue your previous reply exactly where it stopped. Do not repeat or summarise "
@@ -116,6 +116,7 @@ class TurnResult:
     conflicts: int = 0  # contradictions the character was asked to bring up
     refused: bool = False  # the model declined (provider signal or the utility model's call)
     repetition: float = 0.0  # share of the reply recycled from recent replies (0..1)
+    direction: str = ""  # the brief's private note this reply was written under
 
     @property
     def repeated(self) -> bool:
@@ -150,6 +151,15 @@ class ChatService:
         self.registry = registry
         self.memory = memory
         self.session: Session | None = None
+        self.last_direction = ""  # the brief's private note for the latest reply (/direction)
+        self._direction_session: int | None = None  # the session last_direction belongs to
+        self._direction_owner: tuple[int, int] | None = None  # (session id, reply id) it was for
+
+    def current_direction(self) -> str:
+        """The last direction, only if it was written in the session that is open now
+        (it may come from a private chat, so it never shows in another one)."""
+        s = self.session
+        return self.last_direction if s is not None and s.id == self._direction_session else ""
 
     # ── sessions ────────────────────────────────────────────────────────────
 
@@ -328,8 +338,6 @@ class ChatService:
             # In character chats, /system (or [roleplay].rules) replaces the narration rules.
             rules = s.system_prompt or self.config.roleplay.rules
             prompt = compile_system_prompt(char.card, persona.card if persona else None, rules)
-            if lead := INITIATIVE_RULES.get(card_initiative(char.card)):
-                prompt += "\n\n" + apply_macros(lead, char.name, self.user_name())
         if self.content_mode() == "mature":
             mature = apply_macros(MATURE_RULES, char.name if char else "AI", self.user_name())
             prompt = f"{prompt}\n\n{mature}" if prompt.strip() else mature
@@ -550,7 +558,15 @@ class ChatService:
         params = self.gen_params()
         ctx = await self._context(head, ref, params, reminder=False)
         # Not every API allows prefilling the assistant's turn, so ask with a note instead.
-        ctx.messages.append(ChatMessage("user", CONTINUE_NOTE))
+        note = CONTINUE_NOTE
+        if (
+            self._direction_owner == (self.require_session().id, head.id)
+            and self.current_direction()
+        ):
+            # the same reply going on keeps its direction; never one from another chat or turn
+            note = f"{DIRECTION_HEADER}{self.last_direction}\n\n{note}"
+            result.direction = self.last_direction
+        ctx.messages.append(ChatMessage("user", note))
         before = head.content
 
         def save(truncated: bool) -> None:
@@ -580,14 +596,8 @@ class ChatService:
         today = local_day(utcnow(), self.store.tz, self.store.day_boundary)
         note = self.reminder() if reminder else None
         if note is not None and last.role == "user":
-            # Changes every turn (built from the last reply), so it isn't parroted back.
-            previous = next(
-                (m.content for m in reversed(self.store.branch(last.id, limit=4))
-                 if m.role == "assistant"),
-                "",
-            )  # fmt: skip
-            fresh = extra_note or freshness.fresh_note(previous, self.user_name())
-            note = f"{note} {fresh}".strip()
+            if extra_note:  # a rewrite after a recycled reply
+                note = f"{note} {extra_note}".strip()
             if gap := self._time_gap_note(last):
                 note = f"{note}\n\n{gap}"
         system = self.effective_system_prompt()
@@ -597,10 +607,22 @@ class ChatService:
             query = last.content if last.role == "user" else ""
             visible = self._likely_visible(branch, budget, system)
             # refresh: background memory work may have updated the scene since
-            mem = await self.memory.prepare(self.refresh(), query, branch, visible)
+            mem = await self.memory.prepare(
+                self.refresh(), query, branch, visible, self.content_mode()
+            )
             story = mem.story
             if mem.note:
                 note = f"{note}\n\n{mem.note}" if note else mem.note
+            direction = mem.direction if self.character() is not None else ""
+            if direction:
+                # Last, so it sits right next to the newest message.
+                block = DIRECTION_HEADER + direction
+                note = f"{note}\n\n{block}" if note else block
+            if query:  # a continuation has no brief and keeps the last one
+                self.last_direction = direction
+                self._direction_session = self.require_session().id
+            if result is not None:
+                result.direction = direction
             if result is not None:
                 result.recalled = mem.recall.count
                 result.conflicts = len(mem.conflicts)
@@ -641,7 +663,7 @@ class ChatService:
         budget = self.context_budget(ref, self.gen_params())
         branch = self.store.branch(s.head_message_id) if s.head_message_id else []
         visible = self._likely_visible(branch, budget, self.effective_system_prompt())
-        await self.memory.prefetch(s, draft, branch, visible)
+        await self.memory.prefetch(s, draft, branch, visible, self.content_mode())
 
     def _likely_visible(self, branch: list[Message], budget: int, system: str) -> set[int]:
         """Messages that will be in the prompt verbatim (so recall doesn't repeat them).
@@ -700,6 +722,8 @@ class ChatService:
 
         async for ev in self._stream(ref, ctx.messages, params, result, save):
             yield ev
+        if result.message is not None and result.direction:
+            self._direction_owner = (result.message.session_id, result.message.id)
         result.repetition = freshness.repetition(result.text, earlier)
         await self._check_refusal(user_msg, result)
         self._after_reply()  # after the check: memory skips a declined reply
