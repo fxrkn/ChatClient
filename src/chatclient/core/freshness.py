@@ -57,7 +57,7 @@ def fresh_note(previous_reply: str, user: str) -> str:
     return (
         f'Your previous reply began "{opening(previous_reply)}". Begin differently and reuse '
         f"no sentences or images from earlier replies. Respond to what {user} just wrote, "
-        "staying on their topic."
+        "then take it one step further yourself."
     )
 
 

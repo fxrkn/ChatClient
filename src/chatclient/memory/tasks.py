@@ -29,8 +29,13 @@ async def complete(
     *,
     max_tokens: int = 700,
     temperature: float = 0.2,
+    schema: dict[str, Any] | None = None,
 ) -> str:
-    params = GenParams(temperature=temperature, max_tokens=max_tokens)
+    # No hidden reasoning: with a fixed budget a reasoning model would think it all
+    # away and return nothing (seen with DeepSeek V4 Pro on OpenRouter).
+    params = GenParams(
+        temperature=temperature, max_tokens=max_tokens, json_schema=schema, reasoning=False
+    )
     think = ThinkFilter()
     parts: list[str] = []
     async for ev in provider.stream_chat(model, list(messages), params):
@@ -55,6 +60,100 @@ def parse_json(text: str) -> dict[str, Any] | None:
         except ValueError:
             continue
     return None
+
+
+# ── output shapes ───────────────────────────────────────────────────────────
+# Given to servers that can enforce them, small models stop writing broken JSON: the
+# shape is fixed, the content is still entirely the model's. The parsers below stay
+# lenient for servers that can't.
+
+_STR = {"type": "string"}
+
+PASS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "memories": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "content": _STR,
+                    "kind": {"type": "string", "enum": ["event", "fact", "preference",
+                                                        "relationship", "plan", "place"]},
+                    "importance": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "people": {"type": "array", "items": _STR},
+                    "place": _STR,
+                    "story_time": _STR,
+                    "said_by": _STR,
+                    "fact": {"type": "object", "properties": {"key": _STR, "value": _STR},
+                             "required": ["key", "value"]},
+                },
+                "required": ["content", "kind", "importance"],
+            },
+        },
+        "scene": {
+            "type": "object",
+            "properties": {
+                "location": _STR, "time": _STR, "mood": _STR, "activity": _STR,
+                "relationship": _STR, "threads": {"type": "array", "items": _STR},
+            },
+        },
+    },
+    "required": ["memories", "scene"],
+}  # fmt: skip
+
+BRIEF_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "about_past": {"type": "boolean"},
+        "dates": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"from": _STR, "to": _STR},
+                      "required": ["from", "to"]},
+        },
+        "relevant": {"type": "array", "items": _STR},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": _STR,
+                    "status": {"type": "string",
+                               "enum": ["supported", "contradicted", "unsupported"]},
+                    "evidence": {"type": "array", "items": _STR},
+                },
+                "required": ["claim", "status"],
+            },
+        },
+        "note": _STR,
+    },
+    "required": ["about_past", "dates", "relevant", "claims", "note"],
+}  # fmt: skip
+
+
+CONTRADICTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"contradict": {"type": "boolean"}},
+    "required": ["contradict"],
+}
+
+
+def contradiction_prompt(old: str, new: str) -> list[ChatMessage]:
+    task = (
+        "Two notes from the memory of an ongoing story:\n"
+        f'A (earlier): "{old}"\nB (later): "{new}"\n\n'
+        "Do they contradict each other, so that both cannot be true? Two descriptions of "
+        "the same moment, or a detail added later, are NOT a contradiction; a fact that "
+        'changed or was stated differently is (e.g. "lives in Ankara" vs "lives in Izmir").\n'
+        'Return ONLY JSON: {"contradict": true or false}'
+    )
+    return [ChatMessage("system", SYSTEM), ChatMessage("user", task)]
+
+
+def parse_contradiction(text: str) -> bool | None:
+    data = parse_json(text)
+    value = data.get("contradict") if data else None
+    return value if isinstance(value, bool) else None
 
 
 class MemoryItem(BaseModel):
@@ -199,7 +298,8 @@ For a fact that has one value at a time, fill "fact" with a short key in English
 "{user}.cat.name", "{user}.job", "{user}.sister.city". If the fact is already in the known
 fact keys, reuse that exact key, even when the new value is different (a changed or
 contradicting value must be recorded under the same key).
-The scene describes the situation right now."""
+The scene describes the situation right now, in full: "threads" holds only plans or questions
+still open now; leave out what is finished or no longer being talked about."""
     return [ChatMessage("system", SYSTEM), ChatMessage("user", task)]
 
 

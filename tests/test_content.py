@@ -237,3 +237,20 @@ def test_a_character_keeps_its_own_content_setting(chat):
     assert chat.content_mode() == "mature"
     chat.new_session(model="echo:echo")
     assert chat.content_mode() == "standard"  # the default did not change
+
+
+def test_who_leads_is_a_per_character_choice(chat):
+    from chatclient.characters import Card, card_initiative, set_card_initiative
+
+    card = Card(name="Aras", description="adult")
+    aras = chat.store.add_character("ai", card)
+    chat.new_session(model="echo:echo", character_id=aras.id)
+    base = chat.effective_system_prompt()
+    assert "add one thing of Aras's own" in base  # balanced: the default rule only
+    assert "likes to take the lead" not in base and card_initiative(card) == "balanced"
+    set_card_initiative(card, "lead")
+    chat.store.update_character(aras.id, card)
+    assert "Aras likes to take the lead" in chat.effective_system_prompt()
+    set_card_initiative(card, "follow")
+    chat.store.update_character(aras.id, card)
+    assert "mostly follows" in chat.effective_system_prompt()

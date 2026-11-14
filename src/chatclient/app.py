@@ -11,6 +11,7 @@ import os
 import sys
 import warnings
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from chatclient import __version__
 from chatclient.config import Config, ConfigError, load_config
@@ -41,6 +42,15 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--lang", choices=["auto", "tr", "en"], help="interface language")
     p.add_argument("--set-key", metavar="PROVIDER", help="store an API key in the OS keychain")
     p.add_argument("--debug", action="store_true", help="verbose logging to the log file")
+    p.add_argument(
+        "--eval-roleplay",
+        action="store_true",
+        help="play scripted chats with a real model and score the replies (uses -m and --judge)",
+    )
+    p.add_argument("--judge", help="model that grades --eval-roleplay replies (provider:model)")
+    p.add_argument("--compare", help="an earlier --eval-roleplay result file to compare with")
+    p.add_argument("--no-memory", action="store_true", help="--eval-roleplay without memory")
+    p.add_argument("--regrade", help="grade an earlier --eval-roleplay result again (--judge)")
     p.add_argument(
         "--serve",
         action="store_true",
@@ -91,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         return set_key(args.set_key, config, KeyStore(paths.key_file))
     if args.eval_memory:
         return asyncio.run(eval_memory(args, config, paths))
+    if args.eval_roleplay or args.regrade:
+        return asyncio.run(eval_roleplay(args, config, paths))
 
     notes = [t("config_created", path=paths.config_file)] if created else []
     try:
@@ -199,6 +211,36 @@ async def open_app(
 async def close_app(chat: ChatService) -> None:
     await chat.registry.aclose()
     chat.store.close()
+
+
+async def eval_roleplay(args: argparse.Namespace, config: Config, paths: AppPaths) -> int:
+    from datetime import datetime
+
+    from chatclient.evaluate_roleplay import regrade, run_roleplay_eval
+
+    store = Store(paths.db_file)
+    last = store.kv_get("last_model") or ""
+    store.close()
+    chat = args.model or config.models.chat or last
+    judge = args.judge or config.models.utility or chat
+    if not chat:
+        print("error: no model; use -m provider:model", file=sys.stderr)
+        return 1
+    evals = paths.data_dir / "evals"
+    out = evals / f"roleplay-{datetime.now():%Y%m%d-%H%M%S}.json"
+
+    def find(name: str) -> Path:
+        p = Path(name)
+        return p if p.is_file() else evals / name
+
+    compare = find(args.compare) if args.compare else None
+    if args.regrade:
+        await regrade(config, judge, find(args.regrade), out, compare)
+        return 0
+    await run_roleplay_eval(
+        config, chat, judge, paths.data_dir / "models", out, compare, memory=not args.no_memory
+    )
+    return 0
 
 
 async def run(

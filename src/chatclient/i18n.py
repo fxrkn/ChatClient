@@ -90,6 +90,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{old} declined; {new} is writing this reply instead (the declined one: /prev).",
         "tr": "{old} reddetti; bu yanıtı {new} yazıyor (reddedilen sürüm: /prev).",
     },
+    "memory_struggling": {
+        "en": "Memory work keeps failing ({error}). The model may not manage it: set another "
+        "one as [models] utility in the config, or see /memory status.",
+        "tr": "Hafıza işleri sürekli başarısız oluyor ({error}). Model bunu beceremiyor "
+        "olabilir: ayarlarda [models] utility olarak başka bir model seçin ya da /memory status.",
+    },
     "rewrite_repeat": {
         "en": "That reply repeated {pct} of earlier ones; writing a fresh one (the repeat: /prev).",
         "tr": "Bu yanıt öncekilerin {pct} kadarını tekrarladı; yenisi yazılıyor (tekrar eden: /prev).",
@@ -107,6 +113,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "content_mode": {
         "en": "Content: {mode}  (/content standard|mature)",
         "tr": "İçerik: {mode}  (/content standard|mature)",
+    },
+    "utility_set": {
+        "en": "Memory work (recall, notes, summaries) uses {model}.",
+        "tr": "Hafıza işleri (hatırlama, notlar, özetler) {model} ile yapılıyor.",
+    },
+    "utility_chat": {
+        "en": "Memory work uses the chat model ({model}). Set another: /utility provider:model",
+        "tr": "Hafıza işleri sohbet modeliyle ({model}) yapılıyor. Başkasını seçin: /utility sağlayıcı:model",
     },
     "fallback_set": {
         "en": "Declined replies are rewritten by {model}.",
@@ -280,6 +294,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "q_history": {
         "en": "What has happened between you and {name} so far? (optional)",
         "tr": "Sizinle {name} arasında şimdiye kadar neler oldu? (isteğe bağlı)",
+    },
+    "q_initiative": {
+        "en": "Who leads the story with {name}?",
+        "tr": "{name} ile hikâyeyi kim yönlendirsin?",
+    },
+    "char_lead": {
+        "en": "{name} leads: {mode}  (/char lead follow|balanced|lead)",
+        "tr": "{name} yönlendirme: {mode}  (/char lead follow|balanced|lead)",
     },
     "q_themes": {
         "en": "Which themes should the story explore?",
@@ -637,6 +659,7 @@ COMMAND_DOCS: tuple[CommandDoc, ...] = (
     CommandDoc("/char show", "", "show the current character's card", "mevcut karakterin kartını göster"),
     CommandDoc("/char edit", "", "edit the current character", "mevcut karakteri düzenle"),
     CommandDoc("/char color", "<#rrggbb|auto>", "set the character's name colour", "karakterin isim rengini ayarla"),
+    CommandDoc("/char lead", "<follow|balanced|lead>", "who drives the story: you, both, or the character", "hikâyeyi kim yönlendirsin: sen, ikiniz ya da karakter"),
     CommandDoc("/char ai", "<field>", "let the AI rewrite a field (first_mes, mes_example, description)", "bir alanı AI'a yazdır (first_mes, mes_example, description)", "<alan>"),
     CommandDoc("/char import", "<file>", "import a character (.zip with chats & memory, or a .json/.png card)", "karakter içe aktar (sohbet ve hafızalı .zip ya da .json/.png kart)", "<dosya>"),
     CommandDoc("/char export", "", "save a character as .zip with chats & memory (/char export <name> card: the card only)", "karakteri sohbet ve hafızasıyla .zip olarak kaydet (/char export <ad> card: yalnızca kart)"),
@@ -653,6 +676,7 @@ COMMAND_DOCS: tuple[CommandDoc, ...] = (
     CommandDoc("/private", "[on|off]", "private session: no memory, no indexing", "gizli oturum: hafıza ve indeksleme yok"),
     CommandDoc("/content", "[standard|mature]", "content setting (mature: adult fiction, no lectures)", "içerik ayarı (mature: yetişkin kurgu, ahlak dersi yok)"),
     CommandDoc("/fallback", "[provider:model|off]", "model that rewrites declined replies", "reddedilen yanıtları yeniden yazan model"),
+    CommandDoc("/utility", "[provider:model|chat|reset]", "model for memory work (a fast, cheap one is best)", "hafıza işlerini yapan model (hızlı ve ucuz olanı iyidir)"),
     CommandDoc("/lang", "<en|tr|auto>", "interface language", "arayüz dili"),
     CommandDoc("/setup", "", "run the first-time setup again", "ilk kurulum sihirbazını yeniden çalıştır"),
     CommandDoc("/clear", "", "clear the screen (history is kept)", "ekranı temizle (geçmiş silinmez)"),

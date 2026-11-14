@@ -12,16 +12,19 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from chatclient.characters import (
     DEFAULT_USER_NAME,
+    INITIATIVE_RULES,
     MATURE_RULES,
     Card,
     Character,
     apply_macros,
     builtin_cards,
     card_content,
+    card_initiative,
     compile_reminder,
     compile_system_prompt,
     greeting,
@@ -41,7 +44,8 @@ from chatclient.providers.base import (
 from chatclient.providers.registry import ModelRef, ProviderRegistry, parse_model_ref
 from chatclient.storage import Message, Session, Store
 from chatclient.text import MESSAGE_OVERHEAD_TOKENS, estimate_tokens, short_title
-from chatclient.timeutil import local_day, utcnow
+from chatclient.timeutil import from_iso, local_day, to_local, utcnow
+from chatclient.utility import SAME_AS_CHAT, UTILITY_KEY, utility_spec
 
 if TYPE_CHECKING:
     from chatclient.memory.engine import MemoryEngine
@@ -73,6 +77,21 @@ PARAM_TYPES: dict[str, type] = {
     "stop": list,
     "context_tokens": int,
 }
+
+
+TIME_GAP = timedelta(hours=6)  # a break long enough for a person to notice
+
+
+def _duration(d: timedelta) -> str:
+    hours = d.total_seconds() / 3600
+    if hours < 48:
+        return f"{round(hours)} hours"
+    days = round(hours / 24)
+    if days < 14:
+        return f"{days} days"
+    if days < 60:
+        return f"{round(days / 7)} weeks"
+    return f"{round(days / 30)} months"
 
 
 class ChatError(Exception):
@@ -309,6 +328,8 @@ class ChatService:
             # In character chats, /system (or [roleplay].rules) replaces the narration rules.
             rules = s.system_prompt or self.config.roleplay.rules
             prompt = compile_system_prompt(char.card, persona.card if persona else None, rules)
+            if lead := INITIATIVE_RULES.get(card_initiative(char.card)):
+                prompt += "\n\n" + apply_macros(lead, char.name, self.user_name())
         if self.content_mode() == "mature":
             mature = apply_macros(MATURE_RULES, char.name if char else "AI", self.user_name())
             prompt = f"{prompt}\n\n{mature}" if prompt.strip() else mature
@@ -567,6 +588,8 @@ class ChatService:
             )  # fmt: skip
             fresh = extra_note or freshness.fresh_note(previous, self.user_name())
             note = f"{note} {fresh}".strip()
+            if gap := self._time_gap_note(last):
+                note = f"{note}\n\n{gap}"
         system = self.effective_system_prompt()
         story: list[StoryPart] = []
         if self.memory is not None:
@@ -585,6 +608,26 @@ class ChatService:
         else:
             history = self.store.branch(last.id, limit=500)
         return build_context(system, history, budget, today, reminder=note, story=story)
+
+    def _time_gap_note(self, user_msg: Message) -> str:
+        """A fact for the character when the user comes back after a while ("it has been
+        3 days"); how to react is the model's call. Only on the first message after the
+        gap, so it is never repeated."""
+        before = self.store.get_message(user_msg.parent_id) if user_msg.parent_id else None
+        if before is None or self.character() is None:
+            return ""
+        try:
+            gap = from_iso(user_msg.created_at) - from_iso(before.created_at)
+        except ValueError:
+            return ""
+        if gap < TIME_GAP:
+            return ""
+        when = to_local(from_iso(before.created_at), self.store.tz)
+        return (
+            f"Time has passed: the previous message in this conversation was "
+            f"{_duration(gap)} ago ({when:%A %d %B, %H:%M}). {self.user_name()} is writing "
+            "now; the scene may have moved on."
+        )
 
     async def prefetch_memory(self, draft: str) -> None:
         """Prepare memory for a message that is still being typed, so that pressing
@@ -683,7 +726,7 @@ class ChatService:
             result.message = self.store.get_message(result.message.id)
 
     def utility_ref(self) -> ModelRef:
-        spec = self.config.models.utility or self.require_session().model
+        spec = utility_spec(self.store, self.config, self.require_session().model)
         if not spec:
             raise ChatError("no model selected")
         return parse_model_ref(spec)
@@ -711,6 +754,19 @@ class ChatService:
                 lambda r: self.regenerate(r, model=one_off, fresh=True),
             )
         return None
+
+    def utility_model(self) -> str | None:
+        """The model doing memory work for this session (see chatclient.utility)."""
+        return utility_spec(self.store, self.config, self.require_session().model)
+
+    def set_utility_model(self, spec: str | None) -> None:
+        """A model ("provider:model"), "chat" (always the chat model), or None to go
+        back to the config file's [models] utility."""
+        if spec and spec != SAME_AS_CHAT:
+            ref = parse_model_ref(spec)
+            self.registry.get(ref.provider)  # validates the provider
+            spec = str(ref)
+        self.store.kv_set(UTILITY_KEY, spec or "")
 
     def refusal_fallback(self) -> str | None:
         """The model to rewrite a declined reply with: /fallback, else [models]."""

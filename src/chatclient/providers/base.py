@@ -33,6 +33,12 @@ class GenParams:
     repetition_penalty: float | None = None
     seed: int | None = None
     stop: list[str] | None = None
+    # A JSON schema the reply must follow (background tasks). Servers that can enforce
+    # it (Ollama) do; others ignore it and the reply is parsed leniently as before.
+    json_schema: dict[str, Any] | None = None
+    # False: answer directly, no hidden reasoning (background tasks with a token budget:
+    # a reasoning model would spend it all thinking and return nothing). None: default.
+    reasoning: bool | None = None
 
     @classmethod
     def names(cls) -> list[str]:

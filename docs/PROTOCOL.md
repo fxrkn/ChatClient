@@ -84,11 +84,14 @@ Result of a streaming request:
   "refused": false, "repetition": 0.02,
   "stats": {"completion_tokens": 54, "prompt_tokens": 2870, "seconds": 2.1,
             "first_token_seconds": 0.6, "recalled": 2, "conflicts": 0, "dropped_context": 0},
-  "alternatives": {"count": 2, "index": 1}
+  "alternatives": {"count": 2, "index": 1},
+  "memory": {"struggling": false, "error": ""}
 }
 ```
 
 `message` may be `null` if nothing was written. `alternatives.index` is 0-based.
+`memory.struggling` turns true when background memory work keeps failing (usually the
+model can't manage it); worth telling the user once, with `error`.
 
 ## Other requests
 

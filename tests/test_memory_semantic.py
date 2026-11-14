@@ -48,6 +48,10 @@ def scripted_model(script, calls):
         calls.append("\n".join(m.content for m in messages))
         if "memory brief" in prompt:
             text = '{"about_past": false}'
+        elif "Do they contradict each other" in prompt:
+            # a stand-in judge: different cities clash, two tellings of a moment don't
+            same_moment = "unfamiliar" in prompt and "first time" in prompt
+            text = json.dumps({"contradict": not same_moment})
         elif "Return ONLY a JSON object" in prompt:
             text = json.dumps(script.pop(0) if script else {"memories": []}, ensure_ascii=False)
         elif "what has" in prompt and "learned" in prompt:
@@ -183,6 +187,33 @@ async def test_user_contradiction_is_raised_once(setup):
     assert "Contradiction: Ali said earlier that Ali'nin kedisinin adı Pamuk." in calls[-1]
     r = await say(chat, "Tamam.")
     assert r.conflicts == 0  # brought up once only
+
+
+async def test_two_tellings_of_a_moment_are_not_a_contradiction(setup):
+    """Seen in a real chat: the same moment described twice, under one fact key, made
+    the character say "but you told me…" for nothing."""
+    chat, engine, script, _calls = setup
+    first = {
+        "memories": [
+            {
+                "content": "Emma found the taste unfamiliar.",
+                "kind": "fact",
+                "fact": {"key": "emma.reaction.taste", "value": "unfamiliar"},
+            }
+        ]
+    }
+    again = {"memories": [{"content": "Emma, for the first time, found it unfamiliar but fine.",
+                           "kind": "fact", "fact": {"key": "emma.reaction.taste",
+                                                    "value": "not unpleasant"}}]}  # fmt: skip
+    as_event = {"memories": [{"content": "Emma tasted it.", "kind": "event",
+                              "fact": {"key": "emma.reaction.taste", "value": "tasted"}}]}  # fmt: skip
+    script += [first, again, as_event]
+    for text in ("a", "b", "c"):
+        await say(chat, text)
+        await engine.run_all()
+    assert engine.repo.conflicts(chat.require_session().id, None) == []  # judged compatible
+    r = await say(chat, "d")
+    assert r.conflicts == 0
 
 
 async def test_character_contradiction_asks_for_self_correction(setup):

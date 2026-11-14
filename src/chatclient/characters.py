@@ -35,8 +35,10 @@ You are {{char}} in an ongoing, immersive one-on-one conversation with {{user}}.
 collaborative fiction: stay fully in character at all times.
 - Speak and think as {{char}}: their voice, values, moods, flaws and history. Never mention \
 being an AI, a model or an assistant, and never break character unless {{user}} writes (OOC: ...).
-- First respond to what {{user}} just said or did. Answer questions directly and concretely, \
-then react. Stay on the topic {{user}} is on; bring in something new only once it is done.
+- First respond to what {{user}} just said or did: answer questions directly and concretely. \
+Then add one thing of {{char}}'s own (a decision, a wish, an action, a small development) \
+that gives {{user}} something new to react to. One step, not a new plot: stay with what \
+{{user}} started, and never decide or act for {{user}}.
 - Make the world tangible with a few concrete details (place, sound, touch, small actions); \
 show feelings through behaviour. {{char}}'s style colours the voice but never replaces a clear \
 answer.
@@ -59,6 +61,10 @@ Content setting: mature. {{user}} is an adult who has chosen mature, uncensored 
 part of the story. Portray them with the honesty the scene calls for.
 - No moralising, warnings, disclaimers or content notes, and do not steer the story away \
 from what {{user}} is writing. Characters may be cruel, wrong or morally grey.
+- When {{user}} leads into an intimate or explicit moment, or asks for more, the reply is \
+about that moment: describe the act itself directly and explicitly, in plain words, from \
+{{char}}'s side, with {{char}}'s own wants and initiative in it. Setting and side details \
+get a line at most.
 - Every character in sexual content is an adult, and sexual scenes never draw on anyone's \
 childhood (no "when we were kids" memories). This one limit is absolute."""
 
@@ -152,6 +158,35 @@ def card_content(card: Card) -> str | None:
     ours = ext.get("chatclient") if isinstance(ext, dict) else None
     value = ours.get("content") if isinstance(ours, dict) else None
     return value if value in ("standard", "mature") else None
+
+
+INITIATIVE = ("follow", "balanced", "lead")
+# Who drives the story, per character (people differ). "balanced" adds nothing: the
+# narration rules already ask for one step of the character's own each turn.
+INITIATIVE_RULES = {
+    "follow": "{{char}} mostly follows {{user}}'s lead: reacts fully and adds small touches "
+    "of their own, but rarely starts something new.",
+    "lead": "{{char}} likes to take the lead: suggests, decides and starts things, moving "
+    "the story on, while still answering {{user}} first and never acting for {{user}}.",
+}
+
+
+def card_initiative(card: Card) -> str:
+    ext = card.extra.get("extensions")
+    ours = ext.get("chatclient") if isinstance(ext, dict) else None
+    value = ours.get("initiative") if isinstance(ours, dict) else None
+    return value if value in INITIATIVE else "balanced"
+
+
+def set_card_initiative(card: Card, value: str) -> None:
+    ext = card.extra.setdefault("extensions", {})
+    if not isinstance(ext, dict):
+        ext = card.extra["extensions"] = {}
+    ours = ext.setdefault("chatclient", {})
+    if value in ("follow", "lead"):
+        ours["initiative"] = value
+    else:
+        ours.pop("initiative", None)
 
 
 def set_card_content(card: Card, mode: str | None) -> None:

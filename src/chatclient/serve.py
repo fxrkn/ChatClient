@@ -246,6 +246,10 @@ class Server:
                 "dropped_context": r.context.dropped if r.context else 0,
             },
             "alternatives": {"count": len(sibs), "index": index},
+            "memory": {
+                "struggling": bool(self.chat.memory and self.chat.memory.struggling),
+                "error": self.chat.memory.last_failure if self.chat.memory else "",
+            },
         }  # fmt: skip
 
     def alternative(self, step: int) -> Starter | None:

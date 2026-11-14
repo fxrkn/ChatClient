@@ -163,6 +163,8 @@ async def test_a_repeated_reply_is_rewritten_with_a_retry_event(client, chat, mo
 
 def test_the_real_command_line(tmp_path):
     """What the Rust TUI will do: start the process, write lines, read lines."""
+    # no embedding model download in a test (or on CI)
+    (tmp_path / "config.toml").write_text('[memory]\nembeddings = "off"\n', encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, "-m", "chatclient", "--serve", "--home", str(tmp_path), "-m", "echo:echo"],
         input='{"id":1,"method":"hello"}\n{"id":2,"method":"send","params":{"text":"héllo"}}\n'

@@ -22,7 +22,16 @@ from chatclient.char_builder import (
     safe_filename,
     write_card_file,
 )
-from chatclient.characters import Card, Character, card_color, card_content, set_card_color
+from chatclient.characters import (
+    INITIATIVE,
+    Card,
+    Character,
+    card_color,
+    card_content,
+    card_initiative,
+    set_card_color,
+    set_card_initiative,
+)
 from chatclient.core.chat import ChatError
 from chatclient.providers.base import ProviderError
 from chatclient.providers.registry import parse_model_ref
@@ -43,7 +52,7 @@ EDITABLE_FIELDS = (
 )
 
 CHAR_SUBCOMMANDS = (
-    "list", "new", "use", "show", "edit", "color", "ai", "import", "export", "delete",
+    "list", "new", "use", "show", "edit", "color", "lead", "ai", "import", "export", "delete",
 )  # fmt: skip
 
 
@@ -101,6 +110,8 @@ class CharacterCommands:
                     self.start_char(char)
             case "color" | "colour":
                 self.char_color(rest)
+            case "lead" | "initiative":
+                self.char_lead(rest)
             case "show":
                 char = self.require_char(rest) if rest else self.chat.character()
                 if char is None:
@@ -149,6 +160,19 @@ class CharacterCommands:
             markup=False,
         )
 
+    def char_lead(self: Repl, value: str) -> None:
+        """/char lead follow|balanced|lead: who drives the story with this character."""
+        char = self.chat.character()
+        if char is None:
+            raise ChatError(self.t("char_none"))
+        value = value.strip().lower()
+        if value:
+            if value not in INITIATIVE:
+                raise ChatError("/char lead follow|balanced|lead")
+            set_card_initiative(char.card, value)
+            self.chat.store.update_character(char.id, char.card)
+        self.info(self.t("char_lead", name=char.name, mode=card_initiative(char.card)))
+
     def list_chars(self: Repl) -> None:
         table = Table(box=None, header_style=self.style("accent", "bold"), pad_edge=False)
         for col in ("#", "name", "tags", ""):
@@ -187,6 +211,7 @@ class CharacterCommands:
             self.info("tags: " + ", ".join(card.tags))
         if content := card_content(card):
             self.info(f"content: {content}")
+        self.info(f"lead: {card_initiative(card)}")
 
     async def ask_choice(self: Repl, question: str, key: str, max_n: int = 1) -> list[str]:
         opts = options(key, self.t.lang)
@@ -230,6 +255,8 @@ class CharacterCommands:
             # the two of you, and the story
             a.relationship = await self.ask_choice(t("q_relationship"), "relationship")
             a.history = await self.ask(t("q_history", name=name))
+            lead = await self.ask_choice(t("q_initiative", name=name), "initiative")
+            a.initiative = lead[0] if lead and lead[0] in INITIATIVE else "balanced"
             a.genre = await self.ask_choice(t("q_genre"), "genre")
             a.place = await self.ask(t("q_place"))
             if a.content == "mature":

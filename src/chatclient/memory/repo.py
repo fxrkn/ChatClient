@@ -13,6 +13,7 @@ from chatclient.text import normalize_for_search
 from chatclient.timeutil import to_iso, utcnow
 
 KINDS = ("event", "fact", "preference", "relationship", "plan", "place", "insight")
+MOMENTS = ("event", "insight")  # descriptions of a moment, never a one-value fact
 
 # Lower runs first: free local work, then the memory pass, then rarer summaries.
 _INDEXED = (("memory", "memories"), ("summary", "summaries"), ("message", "messages"))
@@ -341,9 +342,11 @@ class MemoryRepo:
         return [(r[0], r[1] or "") for r in rows]
 
     def conflicting(self, scope: Scope, memory: Memory) -> Memory | None:
-        """An earlier, still-valid memory with the same fact key and a different value."""
+        """An earlier, still-valid memory with the same fact key and a different value.
+        Events and insights describe moments, not one-value facts: two of them can't
+        contradict each other (the model labels which is which)."""
         slot = memory.slot
-        if slot is None:
+        if slot is None or memory.kind in MOMENTS:
             return None
         where, args = scope.where()
         rows = self.conn.execute(
@@ -353,7 +356,7 @@ class MemoryRepo:
         ).fetchall()
         for r in rows:
             old = _memory(r)
-            if not same_value(old.value, memory.value):
+            if old.kind not in MOMENTS and not same_value(old.value, memory.value):
                 return old
         return None
 
@@ -705,8 +708,12 @@ class MemoryRepo:
         rows = self.conn.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
         return {r[0]: r[1] for r in rows}
 
-    def last_job_error(self) -> str | None:
+    def last_job_error(self, since: str | None = None) -> str | None:
+        """The latest job error, only if it happened after ``since`` (the last success):
+        an old, already-fixed problem is not worth showing."""
         row = self.conn.execute(
-            "SELECT error FROM jobs WHERE error IS NOT NULL ORDER BY updated_at DESC LIMIT 1"
+            "SELECT error FROM jobs WHERE error IS NOT NULL AND updated_at > ? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (since or "",),
         ).fetchone()
         return row[0] if row else None

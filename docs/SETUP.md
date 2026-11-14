@@ -80,3 +80,15 @@ pip install -e ".[dev]"
 pytest
 ruff check src tests
 ```
+
+Measuring with real models (local ones are fine):
+
+```bash
+chatclient --eval-memory -m ollama:qwen3.5:4b          # the memory brief
+chatclient --eval-roleplay -m <chat model> --judge <judge model>
+chatclient --eval-roleplay ... --compare roleplay-<earlier>.json   # before/after a change
+chatclient --regrade roleplay-<earlier>.json --judge <model>       # same replies, new judge
+```
+
+Results are saved in the data folder under `evals/`. The judge is a model: compare runs,
+don't read one number on its own.

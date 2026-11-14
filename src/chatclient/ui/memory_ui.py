@@ -11,6 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from chatclient.core.chat import ChatError
+from chatclient.memory.engine import LAST_OK_KEY
 
 if TYPE_CHECKING:
     from chatclient.memory.engine import MemoryEngine
@@ -155,7 +156,7 @@ class MemoryCommands:
                 self.info(self.t("memory_running"))
                 n = await engine.run_all()
                 self.info(self.t("memory_ran", n=n))
-                if err := engine.repo.last_job_error():
+                if err := engine.repo.last_job_error(since=self.chat.store.kv_get(LAST_OK_KEY)):
                     self.warn(self.t("memory_last_error", error=err))
             case _:
                 # "/memory <text>" searches
@@ -212,7 +213,7 @@ class MemoryCommands:
                 scope=self.t("scope_character") if scope.character_id else self.t("scope_session"),
             )
         )
-        if err := engine.repo.last_job_error():
+        if err := engine.repo.last_job_error(since=self.chat.store.kv_get(LAST_OK_KEY)):
             self.warn(self.t("memory_last_error", error=err))
         sem = engine.semantic
         detail = engine.embedder.name if engine.embedder else ""

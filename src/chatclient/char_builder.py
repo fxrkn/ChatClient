@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from chatclient.characters import Card, card_content, set_card_content
+from chatclient.characters import Card, card_content, set_card_content, set_card_initiative
 from chatclient.providers.base import ChatMessage, GenParams, Provider, ThinkFilter
 
 # ── wizard options ──────────────────────────────────────────────────────────
@@ -36,6 +36,18 @@ OPTIONS: dict[str, dict[str, list[Option]]] = {
     "content": {
         "tr": _opts([("Standart", "standard"), ("Yetişkin (18+)", "mature")]),
         "en": _opts([("Standard", "standard"), ("Mature (18+)", "mature")]),
+    },
+    "initiative": {
+        "tr": _opts(
+            [
+                ("Sen yönlendir", "follow"),
+                ("Dengeli", "balanced"),
+                ("Karakter yönlendirsin", "lead"),
+            ]
+        ),
+        "en": _opts(
+            [("You lead", "follow"), ("Balanced", "balanced"), ("The character leads", "lead")]
+        ),
     },
     "gender": {
         "tr": _opts([("Erkek", "erkek"), ("Kadın", "kadın"), ("Non-binary", "non-binary")]),
@@ -277,6 +289,7 @@ class WizardAnswers:
     backstory: str = ""
     relationship: list[str] | None = None
     history: str = ""  # what has happened between them so far
+    initiative: str = "balanced"  # who drives the story: follow | balanced | lead
     genre: list[str] | None = None
     place: str = ""
     themes: list[str] | None = None
@@ -387,6 +400,7 @@ def build_card(a: WizardAnswers, lang: str) -> Card:
         tags=["custom", "mature"] if a.content == "mature" else ["custom"],
     )
     set_card_content(card, a.content)
+    set_card_initiative(card, a.initiative)
     return card
 
 

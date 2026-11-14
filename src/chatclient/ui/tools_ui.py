@@ -194,6 +194,26 @@ class ToolCommands:
         else:
             self.info(self.t("content_mode", mode=self.chat.content_mode()))
 
+    def utility_command(self: Repl, arg: str) -> None:
+        """/utility [provider:model | chat | reset]: the model for memory work."""
+        value = arg.strip()
+        if value.lower() in ("reset", "default", "off", "none"):
+            self.chat.set_utility_model(None)
+        elif value.lower() == "chat":
+            self.chat.set_utility_model("chat")
+        elif value:
+            self.chat.set_utility_model(value)
+        current = self.chat.utility_model()
+        chat_model = self.chat.require_session().model
+        if current and current != chat_model:
+            self.info(self.t("utility_set", model=current))
+        else:
+            self.info(self.t("utility_chat", model=chat_model or "-"))
+        engine = self.chat.memory
+        if value and engine is not None:
+            engine.failures = 0  # a new model gets a fresh start (and a fresh warning)
+            self.memory_warned = False
+
     def fallback_command(self: Repl, arg: str) -> None:
         value = arg.strip()
         if value.lower() in ("off", "none"):

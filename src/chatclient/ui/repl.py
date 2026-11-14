@@ -139,6 +139,7 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
         self.known_models: list[str] = []
         self.running = True
         self.last_result: TurnResult | None = None
+        self.memory_warned = False
         self.streaming = False  # a reply is being generated (memory jobs pause)
         self.job_task: asyncio.Future[bool] | None = None
         self.prefetch_task: asyncio.Future[None] | None = None  # brief for the draft
@@ -591,6 +592,11 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
             out.write(f"{INDENT}{warn}{self.t('truncated_len')}{RESET}\n")
         if self.show_stats and not result.cancelled:
             out.write(f"{ansi(th.dim)}{self.stats_line(result)}{RESET}\n")
+        engine = self.chat.memory
+        if engine is not None and engine.struggling and not self.memory_warned:
+            self.memory_warned = True  # once per run: a hint, not nagging
+            hint = self.t("memory_struggling", error=engine.last_failure)
+            out.write(f"{INDENT}{warn}{hint}{RESET}\n")
         out.write("\n")
         out.flush()
 
@@ -704,6 +710,8 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
                 self.content_command(arg)
             case "/fallback":
                 self.fallback_command(arg)
+            case "/utility":
+                self.utility_command(arg)
             case "/memory" | "/mem":
                 await self.memory_command(arg)
             case "/recall":

@@ -48,9 +48,19 @@ class OpenAICompatProvider(HttpProvider):
             return self.config.max_tokens
         return None if is_local(self.config) else CLOUD_DEFAULT_MAX_TOKENS
 
+    _no_extras: set[str]  # models that rejected response_format / reasoning
+
     def build_body(
-        self, model: str, messages: Sequence[ChatMessage], params: GenParams, *, usage: bool
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        params: GenParams,
+        *,
+        usage: bool,
+        extras: bool = True,
     ) -> dict[str, Any]:
+        if not hasattr(self, "_no_extras"):
+            self._no_extras = set()
         body: dict[str, Any] = {
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
@@ -71,24 +81,46 @@ class OpenAICompatProvider(HttpProvider):
             val = getattr(params, key)
             if val is not None:
                 body[key] = val
+        if extras and model not in self._no_extras:
+            if params.json_schema:
+                body["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "result",
+                        "strict": False,
+                        "schema": params.json_schema,
+                    },
+                }
+            if params.reasoning is False and "openrouter.ai" in self.base_url:
+                body["reasoning"] = {"enabled": False}
         return body
 
     async def stream_chat(
         self, model: str, messages: Sequence[ChatMessage], params: GenParams
     ) -> AsyncIterator[StreamEvent]:
         use_usage = self.config.stream_usage
+        extras = True
         try:
-            for attempt in range(2):
-                body = self.build_body(model, messages, params, usage=use_usage)
+            for _attempt in range(3):
+                body = self.build_body(model, messages, params, usage=use_usage, extras=extras)
                 async with self.client.stream(
                     "POST", f"{self.base_url}/chat/completions", json=body
                 ) as resp:
-                    if resp.status_code == 400 and use_usage and attempt == 0:
-                        # Some older servers reject stream_options; retry without it.
+                    if resp.status_code == 400:
                         text = (await resp.aread()).decode("utf-8", "replace")
-                        if "stream_options" in text or "include_usage" in text:
+                        if use_usage and ("stream_options" in text or "include_usage" in text):
+                            # Some older servers reject stream_options; retry without it.
                             log.info("%s: retrying without stream_options", self.name)
                             use_usage = False
+                            continue
+                        if extras and ("response_format" in body or "reasoning" in body):
+                            # Not every server/model takes a JSON schema or the reasoning
+                            # switch: retry plain (the answer is parsed leniently anyway).
+                            log.info(
+                                "%s: %s rejected task options; retrying plain", self.name, model
+                            )
+                            self._no_extras.add(model)
+                            extras = False
                             continue
                         raise ProviderError(f"{self.name}: HTTP 400: {text[:500]}", status=400)
                     await self.raise_for_status(resp)

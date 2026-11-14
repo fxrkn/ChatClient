@@ -228,7 +228,8 @@ async def test_brief_selects_memories_and_resolves_dates(mem):
     brief_prompt = next(c for c in calls if "memory brief" in c)
     assert f"[M{harita.id}]" in brief_prompt  # candidates found by search, shown to the model
     prompt = calls[-1]
-    assert "Current scene — location: Eski liman · mood: meraklı" in prompt
+    assert "Current scene — location: Eski liman" in prompt
+    assert "meraklı" not in prompt  # mood is not repeated every turn (it steers small models)
     assert f"({yesterday} · Deniz Feneri) Ali deniz fenerinde mühürlü bir harita buldu." in prompt
     assert "Pamuk" not in prompt  # the brief didn't pick it
     assert r.recalled == 1

@@ -71,8 +71,11 @@ class OllamaProvider(HttpProvider):
         }
         if self.config.keep_alive:
             body["keep_alive"] = self.config.keep_alive
-        if self.config.think is not None and model not in self._no_think:
-            body["think"] = self.config.think
+        think = False if params.reasoning is False else self.config.think
+        if think is not None and model not in self._no_think:
+            body["think"] = think
+        if params.json_schema:
+            body["format"] = params.json_schema  # decoding is constrained to valid JSON
         return body
 
     async def stream_chat(

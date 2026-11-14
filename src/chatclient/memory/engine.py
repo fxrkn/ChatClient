@@ -51,9 +51,13 @@ from chatclient.providers.registry import ModelRef, ProviderRegistry, parse_mode
 from chatclient.storage import Message, Session, Store
 from chatclient.text import MESSAGE_OVERHEAD_TOKENS, estimate_tokens
 from chatclient.timeutil import local_day, to_iso, utcnow
+from chatclient.utility import utility_spec
 
 log = logging.getLogger(__name__)
 
+SCENE_FACTS = ("location", "time", "relationship")  # sent with every turn; the rest is not
+STRUGGLING_AFTER = 3  # failed memory jobs in a row before the user is told
+LAST_OK_KEY = "memory_last_ok"  # when a memory job last succeeded
 CURSOR_KEY = "memory_cursor:{session}"
 REFLECT_KEY = "reflect_cursor:{scope}"
 MAX_ATTEMPTS = 3
@@ -143,6 +147,8 @@ class MemoryEngine:
         self.semantic = "off"  # off | waiting | loading | ready | failed
         self.index = VectorIndex()
         self._prefetched: dict[int, _Prefetched] = {}
+        self.failures = 0  # memory jobs failed in a row (the model can't do the task)
+        self.last_failure = ""
         self.repo.reset_stale_jobs()
 
     # ── semantic search setup ───────────────────────────────────────────────
@@ -208,7 +214,7 @@ class MemoryEngine:
         return out
 
     def utility_ref(self, session: Session) -> ModelRef:
-        spec = self.config.models.utility or session.model
+        spec = utility_spec(self.store, self.config, session.model)
         if not spec:
             raise MemoryUnavailable("no model for memory work")
         return parse_model_ref(spec)
@@ -235,9 +241,17 @@ class MemoryEngine:
         older = branch[: max(0, len(branch) - self.cfg.keep_recent_messages)]
         return [m for m in older if m.id > covered]
 
-    async def _complete(self, ref: ModelRef, messages: list[Any], max_tokens: int = 700) -> str:
+    async def _complete(
+        self,
+        ref: ModelRef,
+        messages: list[Any],
+        max_tokens: int = 700,
+        schema: dict[str, Any] | None = None,
+    ) -> str:
         provider = self.registry.get(ref.provider)
-        return await tasks.complete(provider, ref.model, messages, max_tokens=max_tokens)
+        return await tasks.complete(
+            provider, ref.model, messages, max_tokens=max_tokens, schema=schema
+        )
 
     # ── scheduling (after each reply) ───────────────────────────────────────
 
@@ -298,6 +312,9 @@ class MemoryEngine:
             delay = to_iso(utcnow() + timedelta(minutes=2 * (job.attempts + 1)))
             log.warning("memory job %s (%s) failed: %s", job.id, job.kind, e)
             self.repo.fail_job(job.id, str(e).split("\n")[0], delay, give_up)
+            if job.kind != "index":
+                self.failures += 1
+                self.last_failure = str(e).split("\n")[0]
         except Exception as e:
             log.exception("memory job %s crashed", job.id)
             if job.kind == "index":
@@ -305,11 +322,20 @@ class MemoryEngine:
             self.repo.fail_job(job.id, f"{type(e).__name__}: {e}", None, True)
         else:
             self.repo.finish_job(job.id)
+            if job.kind != "index":
+                self.failures = 0
+                self.store.kv_set(LAST_OK_KEY, to_iso(utcnow()))  # older errors are stale
             if job.kind != "index" and self.embedder is not None:
                 self.repo.enqueue(None, "index")  # new memories / summaries need vectors too
             if job.kind != "index":
                 self.save_snapshot(job.session_id)
         return True
+
+    @property
+    def struggling(self) -> bool:
+        """Memory work keeps failing: worth telling the user once (they can pick a
+        utility model that copes better)."""
+        return self.failures >= STRUGGLING_AFTER
 
     def save_snapshot(self, session_id: int | None) -> None:
         """Refresh the character's memory.jsonl (its folder keeps what memory learned)."""
@@ -379,7 +405,13 @@ class MemoryEngine:
             char, user, session.scene, self.repo.recent_contents(scope),
             self._lines(session, new), self.repo.fact_keys(scope),
         )  # fmt: skip
-        result = tasks.parse_pass(await self._complete(ref, prompt, max_tokens=1000))
+        raw = await self._complete(ref, prompt, max_tokens=1000, schema=tasks.PASS_SCHEMA)
+        if not raw.strip():
+            raise ValueError(
+                "the model returned no text (a reasoning model may have spent its budget "
+                "thinking; a non-reasoning [models] utility avoids that)"
+            )
+        result = tasks.parse_pass(raw)
         if result is None:
             raise ValueError("the model's memory notes were unreadable")
         last = new[-1]
@@ -396,14 +428,35 @@ class MemoryEngine:
                 attribute=item.attribute, value=item.value, said_by=said_by, key=item.key,
             )  # fmt: skip
             old = self.repo.conflicting(scope, memory)
-            if old is not None:
+            if old is not None and await self._contradicts(ref, old.content, memory.content):
                 # Same fact key, different value: the newer statement wins, the older one
                 # is kept as history, and the character will bring it up.
                 self.repo.supersede(old.id, memory.id)
                 self.repo.add_conflict(session.id, old.id, memory.id)
         if result.scene:
-            self.repo.set_scene(session.id, {**session.scene, **result.scene})
+            # The model describes the scene as it is now; what it leaves out has ended
+            # (a finished activity, a closed thread). Only the lasting facts are kept
+            # when a small model forgets to repeat them.
+            new = dict(result.scene)
+            for k in SCENE_FACTS:
+                if not new.get(k) and session.scene.get(k):
+                    new[k] = session.scene[k]
+            self.repo.set_scene(session.id, new)
         self.store.kv_set(cursor_key, str(last.id))
+
+    async def _contradicts(self, ref: ModelRef, old: str, new: str) -> bool:
+        """Same fact key, different wording: ask the model whether they really clash.
+        A false alarm makes the character say "but you told me…" for nothing, so when
+        the model can't tell, it is not treated as a contradiction."""
+        try:
+            raw = await self._complete(
+                ref, tasks.contradiction_prompt(old, new), max_tokens=20,
+                schema=tasks.CONTRADICTION_SCHEMA,
+            )  # fmt: skip
+        except ProviderError as e:
+            log.info("contradiction check unavailable: %s", e)
+            return False
+        return tasks.parse_contradiction(raw) is True
 
     @staticmethod
     def _speaker(raw: str | None, char: str, user: str) -> str | None:
@@ -615,14 +668,15 @@ class MemoryEngine:
         )  # fmt: skip
         try:
             raw = await asyncio.wait_for(
-                self._complete(ref, prompt, max_tokens=500), self.cfg.brief_timeout
+                self._complete(ref, prompt, max_tokens=500, schema=tasks.BRIEF_SCHEMA),
+                self.cfg.brief_timeout,
             )
         except (TimeoutError, ProviderError) as e:
             log.info("brief unavailable: %s", e)
             return None
         brief = tasks.parse_brief(raw)
         if brief is None:
-            log.info("brief unreadable: %r", raw[:200])
+            log.info("brief unreadable: %r", raw[:200] or "(no text: the model only reasoned)")
         return brief
 
     async def prefetch(
@@ -769,13 +823,11 @@ class MemoryEngine:
         char, user = self.names(session)
         lines: list[str] = []
         scene = session.scene or {}
-        bits = [
-            f"{k}: {scene[k]}"
-            for k in ("location", "time", "mood", "activity", "relationship")
-            if scene.get(k)
-        ]
-        if scene.get("threads"):
-            bits.append("open threads: " + "; ".join(scene["threads"]))
+        # Only facts that keep the story consistent. Mood, "what is happening" and open
+        # threads, repeated next to every message, pull small models back to the same
+        # spot (finish the pizza, the ocean…); the recent conversation already shows
+        # them, and plans that matter are memories, recalled when relevant.
+        bits = [f"{k}: {scene[k]}" for k in SCENE_FACTS if scene.get(k)]
         if bits:
             lines.append("Current scene — " + " · ".join(bits))
         for c in conflicts:
