@@ -49,6 +49,7 @@ from chatclient.theme import (
     rich_style,
 )
 from chatclient.ui.characters_ui import CHAR_SUBCOMMANDS, CharacterCommands
+from chatclient.ui.images_ui import PIC_SUBCOMMANDS, ImageCommands
 from chatclient.ui.keys_ui import KEY_SUBCOMMANDS, KeyCommands
 from chatclient.ui.memory_ui import MEMORY_SUBCOMMANDS, MemoryCommands
 from chatclient.ui.picker import PickItem, pick
@@ -119,6 +120,10 @@ class SlashCompleter(Completer):
                 for n in self.providers():
                     if n.startswith(name):
                         yield Completion(n, start_position=-len(name))
+        elif cmd in ("/pic", "/picture") and " " not in arg:
+            for s in PIC_SUBCOMMANDS:
+                if s.startswith(arg):
+                    yield Completion(s, start_position=-len(arg))
         elif cmd in ("/memory", "/mem") and " " not in arg:
             for s in MEMORY_SUBCOMMANDS:
                 if s.startswith(arg):
@@ -129,7 +134,9 @@ class SlashCompleter(Completer):
                     yield Completion(s, start_position=-len(arg))
 
 
-class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCommands):
+class Repl(
+    CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCommands, ImageCommands
+):
     def __init__(self, chat: ChatService, t: Translator, paths: AppPaths, show_stats: bool = True):
         self.chat = chat
         self.t = t
@@ -140,6 +147,7 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
         self.running = True
         self.last_result: TurnResult | None = None
         self.memory_warned = False
+        self.pic_task: asyncio.Task[None] | None = None  # /pic drawing in the background
         self.streaming = False  # a reply is being generated (memory jobs pause)
         self.job_task: asyncio.Future[bool] | None = None
         self.prefetch_task: asyncio.Future[None] | None = None  # brief for the draft
@@ -404,6 +412,8 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
                 result = self.last_result
                 retry = self.chat.next_attempt(result, done) if result is not None else None
                 if retry is None:
+                    if result is not None and result.text and not result.cancelled:
+                        self.after_reply_picture()  # auto mode: a picture if it's a moment
                     return
                 if retry.reason == "refusal":
                     self.warn(self.t("refusal_fallback", old=result.model, new=retry.model))  # type: ignore[union-attr]
@@ -712,6 +722,8 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
                 self.fallback_command(arg)
             case "/utility":
                 self.utility_command(arg)
+            case "/pic" | "/picture":
+                await self.pic_command(arg)
             case "/memory" | "/mem":
                 await self.memory_command(arg)
             case "/recall":
@@ -861,11 +873,14 @@ class Repl(CharacterCommands, KeyCommands, ToolCommands, SetupCommands, MemoryCo
         if msgs:
             sys.stdout.write("\n")
         you = self.user_label()
+        pictures = self.history_pictures(msgs)
         for m in msgs:
             if m.role == "user":
                 self.write_message(you, self.theme.user, m.content)
             else:
                 self.write_message(self.assistant_label(m.model), self.assistant_color(), m.content)
+                if m.id in pictures:  # the picture drawn for this reply, where it belongs
+                    self.draw_now(pictures[m.id])
 
     async def show_models(self, provider: str | None) -> None:
         names = [provider] if provider else None

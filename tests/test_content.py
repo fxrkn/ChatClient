@@ -225,11 +225,11 @@ def test_brief_note_cannot_steer_a_turn_that_is_not_about_the_past(mem):
 def test_a_character_keeps_its_own_content_setting(chat):
     from chatclient.characters import Card, set_card_content
 
-    card = Card(name="Aras", description="adult")
+    card = Card(name="Kai", description="adult")
     set_card_content(card, "mature")
-    aras = chat.store.add_character("ai", card)
+    kai = chat.store.add_character("ai", card)
     plain = chat.store.add_character("ai", ALPHA)
-    chat.new_session(model="echo:echo", character_id=aras.id)
+    chat.new_session(model="echo:echo", character_id=kai.id)
     assert chat.content_mode() == "mature"  # from the card, default is standard
     chat.new_session(model="echo:echo", character_id=plain.id)
     assert chat.content_mode() == "standard"
@@ -242,15 +242,15 @@ def test_a_character_keeps_its_own_content_setting(chat):
 def test_who_leads_is_a_per_character_choice(chat):
     from chatclient.characters import Card, card_initiative, set_card_initiative
 
-    card = Card(name="Aras", description="adult")
-    aras = chat.store.add_character("ai", card)
-    chat.new_session(model="echo:echo", character_id=aras.id)
+    card = Card(name="Kai", description="adult")
+    kai = chat.store.add_character("ai", card)
+    chat.new_session(model="echo:echo", character_id=kai.id)
     base = chat.effective_system_prompt()
-    assert "add one thing of Aras's own" in base  # balanced: the default rule only
+    assert "add one thing of Kai's own" in base  # balanced: the default rule only
     assert "likes to take the lead" not in base and card_initiative(card) == "balanced"
     set_card_initiative(card, "lead")
-    chat.store.update_character(aras.id, card)
-    assert "Aras likes to take the lead" in chat.effective_system_prompt()
+    chat.store.update_character(kai.id, card)
+    assert "Kai likes to take the lead" in chat.effective_system_prompt()
     set_card_initiative(card, "follow")
-    chat.store.update_character(aras.id, card)
+    chat.store.update_character(kai.id, card)
     assert "mostly follows" in chat.effective_system_prompt()

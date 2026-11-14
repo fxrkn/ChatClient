@@ -50,7 +50,7 @@ def scripted_model(script, calls):
             text = '{"about_past": false}'
         elif "Do they contradict each other" in prompt:
             # a stand-in judge: different cities clash, two tellings of a moment don't
-            same_moment = "unfamiliar" in prompt and "first time" in prompt
+            same_moment = "bitter" in prompt and "first time" in prompt
             text = json.dumps({"contradict": not same_moment})
         elif "Return ONLY a JSON object" in prompt:
             text = json.dumps(script.pop(0) if script else {"memories": []}, ensure_ascii=False)
@@ -196,17 +196,17 @@ async def test_two_tellings_of_a_moment_are_not_a_contradiction(setup):
     first = {
         "memories": [
             {
-                "content": "Emma found the taste unfamiliar.",
+                "content": "Lena found the coffee bitter.",
                 "kind": "fact",
-                "fact": {"key": "emma.reaction.taste", "value": "unfamiliar"},
+                "fact": {"key": "lena.coffee.taste", "value": "bitter"},
             }
         ]
     }
-    again = {"memories": [{"content": "Emma, for the first time, found it unfamiliar but fine.",
-                           "kind": "fact", "fact": {"key": "emma.reaction.taste",
-                                                    "value": "not unpleasant"}}]}  # fmt: skip
-    as_event = {"memories": [{"content": "Emma tasted it.", "kind": "event",
-                              "fact": {"key": "emma.reaction.taste", "value": "tasted"}}]}  # fmt: skip
+    again = {"memories": [{"content": "Lena, for the first time, found the coffee bitter but fine.",
+                           "kind": "fact", "fact": {"key": "lena.coffee.taste",
+                                                    "value": "bitter but fine"}}]}  # fmt: skip
+    as_event = {"memories": [{"content": "Lena tasted the coffee.", "kind": "event",
+                              "fact": {"key": "lena.coffee.taste", "value": "tasted"}}]}  # fmt: skip
     script += [first, again, as_event]
     for text in ("a", "b", "c"):
         await say(chat, text)
@@ -311,6 +311,6 @@ def test_only_the_users_own_words_are_quoted_back(tmp_path):
 def test_memory_pass_asks_for_facts_not_style():
     from chatclient.memory.tasks import memory_pass_prompt
 
-    prompt = memory_pass_prompt("Vera", "Furkan", {}, [], [("2026-11-13", "Vera", "x")])[-1].content
+    prompt = memory_pass_prompt("Mira", "Sam", {}, [], [("2026-11-13", "Mira", "x")])[-1].content
     assert "Never record how something was described" in prompt
     assert "probably made up" in prompt

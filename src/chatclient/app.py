@@ -265,6 +265,10 @@ async def run(
         from chatclient.ui.repl import run_repl
 
         enable_windows_vt()
+        if config.images.inline == "auto":
+            from chatclient.ui import sixel
+
+            sixel.ask_terminal()  # can it draw pictures? (asked before the prompt reads input)
         await run_repl(chat, t, paths, notes, config.ui.show_stats)
         return 0
     except (ChatError, ProviderError, ValueError) as e:

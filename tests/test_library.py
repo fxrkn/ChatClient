@@ -249,8 +249,8 @@ async def test_a_chat_file_can_be_imported_alone(home, tmp_path):
 def test_personas_have_their_own_folder(home):
     root, lib, store, chat = home
     chat.new_session(model="echo:echo")
-    chat.set_persona(Card(name="Furkan", description="28"))
-    assert (root / "personas" / "Furkan" / "persona.json").is_file()
+    chat.set_persona(Card(name="Sam", description="28"))
+    assert (root / "personas" / "Sam" / "persona.json").is_file()
     path = lib.export_character(store, chat.persona(), root / "out")
     assert zipfile.ZipFile(path).namelist() == ["persona.json"]
 
@@ -289,3 +289,32 @@ async def test_the_old_chats_folder_moves_to_plain_chats(home):
     chat2.open_session(store2.latest_session().id)
     assert chat2.history()[0].content == "from before the rename"
     store2.close()
+
+
+async def test_pictures_travel_with_the_character(home, tmp_path):
+    root, lib, store, chat = home
+    alpha = store.add_character("ai", ALPHA)
+    chat.new_session(model="echo:echo", character_id=alpha.id)
+    await say(chat, "hi")
+    images = root / "characters" / "Alpha" / "images"
+    images.mkdir()
+    (images / "shown.png").write_bytes(b"PNG1")
+    (images / "shown.json").write_text('{"prompt": "x"}', encoding="utf-8")
+    reply = chat.last_reply()
+    store.set_message_meta(reply.id, {"images": ["shown.png"]})
+    chat.new_session(model="echo:echo", character_id=alpha.id)
+    chat.set_private(True)
+    await say(chat, "secret")
+    (images / "secret.png").write_bytes(b"PNG2")
+    store.set_message_meta(chat.last_reply().id, {"images": ["secret.png"]})
+
+    out = lib.export_character(store, store.get_character(alpha.id), tmp_path / "out")
+    names = zipfile.ZipFile(out).namelist()
+    assert "images/shown.png" in names and "images/shown.json" in names
+    assert "images/secret.png" not in names  # drawn in a private chat: stays home
+
+    other_lib, other, _ = open_home(tmp_path / "other")
+    other_lib.import_path(other, out)
+    got = tmp_path / "other" / "characters" / "Alpha" / "images" / "shown.png"
+    assert got.read_bytes() == b"PNG1"
+    other.close()

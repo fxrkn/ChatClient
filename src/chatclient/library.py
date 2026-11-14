@@ -142,6 +142,7 @@ class Imported:
     chats: int = 0
     memories: int = 0
     copy: bool = False  # it already existed, so a copy was made
+    uuid: str = ""
 
 
 class Library:
@@ -602,17 +603,30 @@ class Library:
     def export_character(
         self, store: Store, char: Character, dest: Path, *, chats: bool = True, memory: bool = True
     ) -> Path:
-        """A zip: card.json (+ chats/*.jsonl, memory.jsonl). Private chats stay home."""
+        """A zip: card.json (+ chats/*.jsonl, memory.jsonl, images/). Private chats, and
+        the pictures drawn in them, stay home."""
         card_path = self.write_card(char)
         dest.mkdir(parents=True, exist_ok=True)
         out = dest / f"{slug(char.card.name)}.zip"
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(card_path, CARD_FILE[char.kind])
             if chats and char.kind == "ai":
+                private: set[str] = set()
                 for s in store.all_sessions():
+                    if s.character_id != char.id:
+                        continue
                     path = self.chat_path(store, s)
-                    if s.character_id == char.id and not s.private and path.is_file():
+                    if s.private:
+                        for m in store.session_messages(s.id):
+                            private.update((m.meta or {}).get("images") or [])
+                    elif path.is_file():
                         z.write(path, f"chats/{path.name}")
+                images = self.folder(char) / "images"
+                if images.is_dir():
+                    for f in sorted(images.iterdir()):
+                        picture = f.with_suffix(".png").name
+                        if f.suffix in (".png", ".json") and picture not in private:
+                            z.write(f, f"images/{f.name}", zipfile.ZIP_STORED)
             if memory and char.kind == "ai" and self._has_memory(store, char):
                 z.write(self.write_memory(store, char), MEMORY_FILE)
         return out
@@ -627,7 +641,15 @@ class Library:
             if name not in files:
                 raise ValueError("no card.json or persona.json in it")
             kind = "user" if name == CARD_FILE["user"] else "ai"
-            return self._import_package(store, Card.from_json(files[name]), kind, files)
+            got = self._import_package(store, Card.from_json(files[name]), kind, files)
+            if kind == "ai" and (pictures := _read_pictures(path)):
+                char = store.character_by_uuid(got.uuid)
+                if char is not None:
+                    folder = self.folder(char) / "images"
+                    folder.mkdir(parents=True, exist_ok=True)
+                    for picture_name, data in pictures.items():
+                        (folder / picture_name).write_bytes(data)
+            return got
         if path.suffix.lower() == ".jsonl":
             return self.import_chat(store, path.read_text(encoding="utf-8-sig"))
         return self._import_package(store, read_card_file(path), kind, {})
@@ -644,7 +666,8 @@ class Library:
         if cid:
             ids.map[cid] = new_cid
         char = store.add_character(kind, card, char_uuid=new_cid)
-        result = Imported("persona" if kind == "user" else "character", char.name, copy=copy)
+        result = Imported("persona" if kind == "user" else "character", char.name, copy=copy,
+                          uuid=char.uuid)  # fmt: skip
         for name in sorted(files):
             is_chat = name.startswith("chats/") and name.endswith(".jsonl")
             if is_chat and self.apply(store, parse_lines(files[name]), ids) is not None:
@@ -663,6 +686,25 @@ class Library:
         copy = store.session_by_uuid(head.get("id")) is not None
         s = self.apply(store, events, IdMap(fresh=copy))
         return Imported("chat", (s.title if s else "") or "chat", chats=1, copy=copy)
+
+
+def _read_pictures(path: Path) -> dict[str, bytes]:
+    """The package's images/ (pictures and how they were made), by file name only: a
+    name inside a zip can't point anywhere else on disk."""
+    out: dict[str, bytes] = {}
+    if path.is_dir():
+        for f in path.rglob("images/*"):
+            if f.is_file() and f.suffix in (".png", ".json"):
+                out[f.name] = f.read_bytes()
+    else:
+        with zipfile.ZipFile(path) as z:
+            for info in z.infolist():
+                parts = info.filename.replace("\\", "/").split("/")
+                name = parts[-1]
+                if (len(parts) >= 2 and parts[-2] == "images" and name.endswith((".png", ".json"))
+                        and info.file_size < 50 * 1024 * 1024):  # fmt: skip
+                    out[Path(name).name] = z.read(info)
+    return out
 
 
 def _read_package(path: Path) -> dict[str, str]:

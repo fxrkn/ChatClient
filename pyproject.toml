@@ -21,6 +21,7 @@ dependencies = [
     # meaning-based recall: a small local multilingual model (downloaded on first use)
     "fastembed>=0.5",
     "numpy>=1.26",
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]

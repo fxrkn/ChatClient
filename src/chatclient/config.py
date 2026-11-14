@@ -151,8 +151,25 @@ class RoleplayConfig(_Strict):
     rewrite_repeats: bool = True  # a reply mostly recycled from earlier ones is rewritten once
 
 
+class ImagesConfig(_Strict):
+    """Pictures of the scene (see /pic; /pic setup asks for all of this)."""
+
+    backend: Literal["comfyui", "cloud"] = "comfyui"  # local ComfyUI, or an online model
+    cloud_model: str = ""  # cloud: "provider:model", an image model (e.g. on OpenRouter)
+    url: str = "http://127.0.0.1:8188"
+    style: Literal["tags", "natural"] = "tags"  # tags: SD 1.5 / SDXL / Pony; natural: Flux
+    quality: str = "masterpiece, best quality"  # put in front of every prompt ("" for none)
+    extra: str = ""  # added to every picture, as written (a style, LoRA trigger words…)
+    negative: str = ""  # added to the workflow's negative prompt
+    inline: Literal["auto", "sixel", "off"] = "auto"  # draw pictures inside the terminal
+    inline_width: int = 384  # pixels
+    open: bool = False  # also open each picture in the image viewer (always, if not inline)
+    timeout: float = 180.0  # seconds to wait for ComfyUI
+
+
 class Config(_Strict):
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     roleplay: RoleplayConfig = Field(default_factory=RoleplayConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
@@ -229,6 +246,17 @@ stop_at_user_turn = true # cut the reply if the model starts writing your lines
 content = "standard"     # "mature": adult fiction, no lectures or disclaimers (see /content)
 rewrite_repeats = true   # a reply that mostly repeats earlier ones is rewritten once, automatically
 # rules = """..."""      # replace the built-in narration rules
+
+[images]                 # pictures of the scene (/pic setup walks through these)
+backend = "comfyui"      # "comfyui" (local) or "cloud" (an image model online)
+cloud_model = ""         # cloud: provider:model, e.g. an image model on OpenRouter
+url = "http://127.0.0.1:8188"
+style = "tags"           # "tags" for SD 1.5 / SDXL / Pony checkpoints, "natural" for Flux
+quality = "masterpiece, best quality"
+extra = ""               # added to every picture as written (style, LoRA trigger words…)
+negative = ""            # added to the workflow's negative prompt
+inline = "auto"          # show pictures in the terminal (Sixel): "auto", "sixel" (force) or "off"
+open = false             # also open them in the image viewer (always done when not inline)
 
 [memory]
 enabled = true           # long-term memory: summaries, remembered facts, scene state

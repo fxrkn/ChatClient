@@ -73,6 +73,41 @@ plain-chats/*.jsonl          (chats without a character)
 machines. For a portable install (e.g. on a USB stick), create an empty file named
 `portable` next to the `.venv` folder: data then goes to `ChatClientData` beside it.
 
+### Pictures (optional)
+
+With a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) running, a character
+chat can show the scene. In ComfyUI, export your workflow with **Save (API Format)**
+(enable Dev mode in the settings), then in ChatClient:
+
+```
+/pic setup "C:\path\to\workflow.json"
+/pic                       # draw the current moment (in the background)
+/pic close-up, from above  # with a wish (the model works it into the prompt)
+/pic smiling +pov, from below   # after "+": tags used exactly as written
+/pic extra my_lora_trigger      # tags added to every picture of this character
+/pic look                  # the character's fixed look, used in every picture
+/pic show                  # show the latest picture again
+/pic again                 # redraw it with another seed (no new prompt: quicker)
+/pic auto on               # a picture by itself when the model sees a new moment
+```
+
+The workflow can be changed from here, without wiring nodes in ComfyUI:
+
+```
+/pic info                  # what it uses now
+/pic model                 # list the checkpoints; /pic model <n or name> to switch
+/pic lora                  # list the LoRAs; /pic lora <name> 0.7 to add, /pic lora off
+/pic vpred on              # needed by v-prediction checkpoints (their name usually says vpred)
+/pic set cfg=7 steps=24 sampler=dpmpp_2m scheduler=karras size=512x768
+```
+
+Pictures appear inside the terminal where it can draw them (Sixel: Windows Terminal
+1.22+, WezTerm, foot, mlterm…); elsewhere they open in the image viewer. Set
+`inline = "sixel"` to force it, or `"off"` to always use the viewer.
+
+`[images]` in the config holds the ComfyUI address and the prompt style (`tags` for
+SD 1.5 / SDXL / Pony, `natural` for Flux). Pictures are saved in the character's folder.
+
 ### Development
 
 ```bash

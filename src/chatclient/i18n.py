@@ -114,6 +114,167 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Content: {mode}  (/content standard|mature)",
         "tr": "İçerik: {mode}  (/content standard|mature)",
     },
+    "pic_setup_usage": {
+        "en": "Pictures aren't set up yet: /pic setup",
+        "tr": "Resimler henüz kurulmadı: /pic setup",
+    },
+    "pic_wiz_pick": {"en": "number (Enter = {n})", "tr": "numara (Enter = {n})"},
+    "pic_wiz_where": {"en": "How should pictures be made?", "tr": "Resimler nasıl yapılsın?"},
+    "pic_wiz_local": {
+        "en": "On this computer with ComfyUI (free, private, any model, adult content OK)",
+        "tr": "Bu bilgisayarda ComfyUI ile (ücretsiz, gizli, her model, yetişkin içerik olur)",
+    },
+    "pic_wiz_cloud": {
+        "en": "Online with an image model via OpenRouter (no GPU needed; paid; most refuse "
+        "adult content)",
+        "tr": "Çevrimiçi, OpenRouter'daki bir resim modeliyle (ekran kartı gerekmez; ücretli; "
+        "çoğu yetişkin içeriği reddeder)",
+    },
+    "pic_wiz_cloud_note": {
+        "en": "Looking up the image models…",
+        "tr": "Resim modelleri aranıyor…",
+    },
+    "pic_wiz_cloud_model": {"en": "Which image model?", "tr": "Hangi resim modeli?"},
+    "pic_wiz_no_key": {
+        "en": "OpenRouter has no API key yet: /key set openrouter, then /pic setup again.",
+        "tr": "OpenRouter için API anahtarı yok: /key set openrouter, sonra tekrar /pic setup.",
+    },
+    "pic_wiz_no_models": {
+        "en": "No image models found on OpenRouter.",
+        "tr": "OpenRouter'da resim modeli bulunamadı.",
+    },
+    "pic_wiz_url": {
+        "en": "ComfyUI address (Enter keeps it):",
+        "tr": "ComfyUI adresi (Enter ile aynı kalır):",
+    },
+    "pic_wiz_no_comfy": {
+        "en": "ComfyUI isn't answering at {url}. Start it, then /pic setup again.",
+        "tr": "ComfyUI {url} adresinde cevap vermiyor. Başlatıp tekrar /pic setup yazın.",
+    },
+    "pic_wiz_workflow": {"en": "Which workflow?", "tr": "Hangi workflow?"},
+    "pic_wiz_simple": {
+        "en": "A simple one, made for you (just pick a model)",
+        "tr": "Basit bir tane, sizin için hazırlanır (yalnızca model seçin)",
+    },
+    "pic_wiz_own": {
+        "en": "My own (a file saved with ComfyUI's Save (API Format))",
+        "tr": "Kendi workflow'um (ComfyUI'de Save (API Format) ile kaydedilmiş dosya)",
+    },
+    "pic_wiz_own_path": {"en": "Path of the workflow file:", "tr": "Workflow dosyasının yolu:"},
+    "pic_wiz_no_ckpt": {
+        "en": "ComfyUI has no checkpoints. Put one in its models/checkpoints folder.",
+        "tr": "ComfyUI'de hiç model yok. models/checkpoints klasörüne bir model koyun.",
+    },
+    "pic_wiz_family": {"en": "What kind of model is it?", "tr": "Bu ne tür bir model?"},
+    "pic_wiz_sd15": {
+        "en": "SD 1.5 (about 2 GB; 512 px; fast, fits small GPUs)",
+        "tr": "SD 1.5 (yaklaşık 2 GB; 512 px; hızlı, küçük ekran kartlarına sığar)",
+    },
+    "pic_wiz_sdxl": {
+        "en": "SDXL, Illustrious, NoobAI or Pony (about 6-7 GB; 1024 px; slower)",
+        "tr": "SDXL, Illustrious, NoobAI ya da Pony (yaklaşık 6-7 GB; 1024 px; daha yavaş)",
+    },
+    "pic_wiz_vpred": {
+        "en": 'Is it a v-prediction model ("vpred" in its name)? [y/N]',
+        "tr": 'v-prediction modeli mi (adında "vpred" geçer)? [e/H]',
+    },
+    "pic_wiz_auto": {
+        "en": "Draw pictures by themselves when the model sees a new moment? [y/N]",
+        "tr": "Model yeni bir an gördüğünde resim kendiliğinden çizilsin mi? [e/H]",
+    },
+    "pic_wiz_done": {
+        "en": "Pictures are set up. /pic draws the scene; /help pic lists the rest.",
+        "tr": "Resimler kuruldu. /pic sahneyi çizer; diğer komutlar için /help.",
+    },
+    "pic_wiz_test": {
+        "en": "Draw a test picture of this scene now? [Y/n]",
+        "tr": "Şimdi bu sahnenin bir deneme resmini çizeyim mi? [E/h]",
+    },
+    "pic_cloud_no_workflow": {
+        "en": "Pictures are made online now; models, LoRAs and sampler settings are for "
+        "ComfyUI (/pic setup to switch).",
+        "tr": "Resimler şu an çevrimiçi yapılıyor; model, LoRA ve örnekleyici ayarları "
+        "ComfyUI içindir (değiştirmek için /pic setup).",
+    },
+    "pic_inline": {
+        "en": "Pictures in the terminal: {mode} (drawing here: {works}). /pic inline auto|sixel|off",
+        "tr": "Terminalde resim: {mode} (burada çizilir: {works}). /pic inline auto|sixel|off",
+    },
+    "pic_extra": {
+        "en": "Added to every picture of {name}: {tags}  (/pic extra <tags> · /pic extra reset)",
+        "tr": "{name} için her resme eklenen: {tags}  (/pic extra <etiketler> · /pic extra reset)",
+    },
+    "pic_extra_unset": {"en": "(nothing)", "tr": "(hiçbir şey)"},
+    "pic_info": {
+        "en": "Workflow: {ckpt} · LoRA: {loras} · v-pred: {vpred} · cfg {cfg}, {steps} steps, "
+        "{sampler}/{scheduler}, {size}",
+        "tr": "Workflow: {ckpt} · LoRA: {loras} · v-pred: {vpred} · cfg {cfg}, {steps} adım, "
+        "{sampler}/{scheduler}, {size}",
+    },
+    "pic_models": {"en": "Checkpoints in ComfyUI", "tr": "ComfyUI'deki modeller"},
+    "pic_loras": {"en": "LoRAs in ComfyUI", "tr": "ComfyUI'deki LoRA'lar"},
+    "pic_pick_hint": {
+        "en": "Choose by number or part of the name, e.g. /pic model 3 or /pic lora detailer 0.7",
+        "tr": "Numara ya da adın bir kısmıyla seçin, örn. /pic model 3 ya da /pic lora detailer 0.7",
+    },
+    "pic_pick_none": {
+        "en": "“{ref}” matches {n} names; use the number from the list.",
+        "tr": "“{ref}” {n} adla eşleşiyor; listedeki numarayı kullanın.",
+    },
+    "pic_auto_on": {
+        "en": "Auto pictures on: after a reply, the model decides if it's a new moment worth "
+        "drawing (/pic auto off).",
+        "tr": "Otomatik resim açık: her yanıttan sonra model, çizmeye değer yeni bir an olup "
+        "olmadığına karar verir (/pic auto off).",
+    },
+    "pic_auto_off": {
+        "en": "Auto pictures off (/pic auto on).",
+        "tr": "Otomatik resim kapalı (/pic auto on).",
+    },
+    "pic_none": {
+        "en": "No picture in this conversation yet (/pic).",
+        "tr": "Bu sohbette henüz resim yok (/pic).",
+    },
+    "pic_cfg_odd": {
+        "en": "Note: the KSampler has cfg {cfg} (steps {steps}). Most SD 1.5/SDXL checkpoints "
+        "want cfg 5-8 and 20-30 steps: higher burns the picture, near 1 ignores the prompt "
+        "(only turbo/lightning models are made for that).",
+        "tr": "Not: KSampler'da cfg {cfg} (steps {steps}). Çoğu SD 1.5/SDXL modeli cfg 5-8 ve "
+        "20-30 adım ister: daha yüksek değer resmi yakar, 1'e yakın değer istemi yok sayar "
+        "(yalnızca turbo/lightning modeller bunun için yapılır).",
+    },
+    "pic_did_you_mean": {
+        "en": "Did you mean: {cmd}",
+        "tr": "Bunu mu demek istediniz: {cmd}",
+    },
+    "pic_setup_done": {
+        "en": "Workflow ready ({model}). /pic draws the current moment.",
+        "tr": "Workflow hazır ({model}). /pic o anki sahneyi çizer.",
+    },
+    "pic_look": {
+        "en": "{name} in every picture: {look}  (/pic look <tags> · /pic look reset)",
+        "tr": "Her resimde {name}: {look}  (/pic look <etiketler> · /pic look reset)",
+    },
+    "pic_look_unset": {
+        "en": "(written from the card at the first picture)",
+        "tr": "(ilk resimde karttan yazılacak)",
+    },
+    "pic_busy": {
+        "en": "A picture is still being drawn.",
+        "tr": "Bir resim hâlâ çiziliyor.",
+    },
+    "pic_drawing": {
+        "en": "Drawing the scene in the background; keep chatting.",
+        "tr": "Sahne arka planda çiziliyor; sohbete devam edebilirsiniz.",
+    },
+    "pic_ready": {
+        "en": "Picture ready ({s}s): {path}",
+        "tr": "Resim hazır ({s} sn): {path}",
+    },
+    "pic_failed": {
+        "en": "No picture: {error}",
+        "tr": "Resim yapılamadı: {error}",
+    },
     "utility_set": {
         "en": "Memory work (recall, notes, summaries) uses {model}.",
         "tr": "Hafıza işleri (hatırlama, notlar, özetler) {model} ile yapılıyor.",
@@ -676,6 +837,19 @@ COMMAND_DOCS: tuple[CommandDoc, ...] = (
     CommandDoc("/private", "[on|off]", "private session: no memory, no indexing", "gizli oturum: hafıza ve indeksleme yok"),
     CommandDoc("/content", "[standard|mature]", "content setting (mature: adult fiction, no lectures)", "içerik ayarı (mature: yetişkin kurgu, ahlak dersi yok)"),
     CommandDoc("/fallback", "[provider:model|off]", "model that rewrites declined replies", "reddedilen yanıtları yeniden yazan model"),
+    CommandDoc("/pic", "[what to show] [+tags]", "draw the current scene (in the background)", "o anki sahneyi çiz (arka planda)"),
+    CommandDoc("/pic setup", "[workflow.json]", "set up pictures: local ComfyUI or an online model (a wizard); with a file: use your own ComfyUI workflow", "resimleri kur: yerel ComfyUI ya da çevrimiçi model (sihirbaz); dosyayla: kendi ComfyUI workflow'unuz", "[workflow.json]"),
+    CommandDoc("/pic show", "", "show the latest picture again", "son resmi tekrar göster"),
+    CommandDoc("/pic inline", "[auto|sixel|off]", "pictures inside the terminal, or in the image viewer", "resimler terminalde mi, resim görüntüleyicide mi"),
+    CommandDoc("/pic model", "[n|name]", "choose the checkpoint (lists them without a name)", "modeli seç (ad vermezseniz listeler)"),
+    CommandDoc("/pic lora", "[n|name] [strength]|off", "add a LoRA to the workflow (lists them without a name)", "workflow'a LoRA ekle (ad vermezseniz listeler)"),
+    CommandDoc("/pic vpred", "on|off", "v-prediction, needed by v-pred checkpoints (their name usually says vpred)", "v-prediction, v-pred modeller için gerekli (adlarında genellikle vpred geçer)"),
+    CommandDoc("/pic set", "cfg=5 steps=28 sampler=euler size=832x1216", "sampler settings and size", "örnekleyici ayarları ve boyut"),
+    CommandDoc("/pic info", "", "what the workflow uses now", "workflow'un şu an kullandıkları"),
+    CommandDoc("/pic again", "", "draw the last picture again with another seed (quick)", "son resmi başka bir seed ile yeniden çiz (hızlı)"),
+    CommandDoc("/pic auto", "[on|off]", "a picture by itself when the model sees a new moment", "model yeni bir an gördüğünde kendiliğinden resim"),
+    CommandDoc("/pic extra", "[tags|reset]", "tags added to every picture of this character (e.g. a LoRA trigger); /pic …+tags adds tags to one picture as written", "bu karakterin her resmine eklenen etiketler (örn. LoRA tetikleyicisi); /pic …+etiketler tek resme olduğu gibi ekler", "[etiketler|reset]"),
+    CommandDoc("/pic look", "[tags|reset]", "the character's fixed look in every picture", "karakterin her resimdeki sabit görünüşü", "[etiketler|reset]"),
     CommandDoc("/utility", "[provider:model|chat|reset]", "model for memory work (a fast, cheap one is best)", "hafıza işlerini yapan model (hızlı ve ucuz olanı iyidir)"),
     CommandDoc("/lang", "<en|tr|auto>", "interface language", "arayüz dili"),
     CommandDoc("/setup", "", "run the first-time setup again", "ilk kurulum sihirbazını yeniden çalıştır"),

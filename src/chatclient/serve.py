@@ -12,14 +12,27 @@ import asyncio
 import contextlib
 import json
 import logging
+import shutil
 import sys
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any, BinaryIO
 
 from chatclient import __version__
 from chatclient.characters import card_content
 from chatclient.core.chat import ChatError, ChatService, TurnResult
+from chatclient.images import (
+    ImageError,
+    ImageMaker,
+    card_look,
+    load_workflow,
+    pictures_of,
+    problem,
+    saved_prompt,
+    set_card_look,
+    workflow_file,
+)
 from chatclient.providers.base import ProviderError, StreamEvent
 from chatclient.storage import Message, Session
 
@@ -29,7 +42,7 @@ PROTOCOL_VERSION = 1
 WORKER_IDLE_SECONDS = 1.0
 # allowed while a reply is being written (they change nothing)
 READ_ONLY = {"hello", "session.get", "history", "sessions.list", "characters.list",
-             "models.list", "draft"}  # fmt: skip
+             "models.list", "draft", "picture.look"}  # fmt: skip
 
 Starter = Callable[[TurnResult], AsyncIterator[StreamEvent]]
 
@@ -57,6 +70,7 @@ class Server:
         self.generation: asyncio.Task[None] | None = None
         self.job_task: asyncio.Task[bool] | None = None
         self.prefetch_task: asyncio.Task[None] | None = None
+        self.picture_task: asyncio.Task[None] | None = None
         self.running = True
         self._write_lock = threading.Lock()
         self.methods: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {
@@ -73,6 +87,8 @@ class Server:
             "content.set": self.content_set,
             "private.set": self.private_set,
             "draft": self.draft,
+            "picture.setup": self.picture_setup,
+            "picture.look": self.picture_look,
         }
         # these stream a reply: "start", "token"… events, then the result
         self.streaming: dict[str, Callable[[dict[str, Any]], Starter]] = {
@@ -127,7 +143,7 @@ class Server:
                     break
         finally:
             self.running = False
-            for task in (self.generation, self.prefetch_task, worker):
+            for task in (self.generation, self.prefetch_task, self.picture_task, worker):
                 if task is not None and not task.done():
                     task.cancel()
             for task in (self.generation, worker):
@@ -161,6 +177,10 @@ class Server:
                 if stopped:
                     self.generation.cancel()  # type: ignore[union-attr]
                 self.reply(rid, {"cancelled": stopped})
+            elif method == "picture":
+                self.start_picture(rid, str(params.get("wish") or ""), bool(params.get("auto")))
+            elif method == "picture.again":
+                self.start_picture(rid, "", again=True)
             elif method == "alt":
                 self.start_generation(rid, self.alternative(int(params.get("step", 1))))
             elif method in self.streaming:
@@ -363,6 +383,70 @@ class Server:
             raise
         except Exception:
             log.exception("prefetch failed")
+
+    # ── pictures (ComfyUI) ──────────────────────────────────────────────────
+
+    def workflow(self) -> Path:
+        return workflow_file(Path(self.chat.store.path).parent)
+
+    def start_picture(self, rid: Any, wish: str, auto: bool = False, again: bool = False) -> None:
+        """Drawn in the background: chatting goes on; the answer comes when it's ready."""
+        if self.picture_task is not None and not self.picture_task.done():
+            raise RequestError("busy", "a picture is still being drawn")
+        if (why := problem(self.chat, self.workflow())) is not None:
+            raise RequestError("image", why)
+        self.picture_task = asyncio.ensure_future(self._picture(rid, wish, auto, again))
+
+    def _last_picture(self) -> Path | None:
+        char = self.chat.character()
+        found = pictures_of(self.chat.store, char, self.chat.history(limit=40)) if char else []
+        return found[-1][1] if found else None
+
+    async def _picture(self, rid: Any, wish: str, auto: bool, again: bool) -> None:
+        maker = ImageMaker(self.chat, self.workflow())
+        last = self._last_picture()
+        try:
+            if again:
+                if last is None:
+                    raise ImageError("no picture in this conversation yet")
+                pic = await maker.again(last)
+            else:
+                if auto and not await maker.worth_drawing(saved_prompt(last) if last else ""):
+                    self.reply(rid, {"skipped": True})  # not a new moment
+                    return
+                pic = await maker.draw(wish)
+        except (ImageError, ProviderError, ChatError) as e:
+            self.fail(rid, "image", str(e).split("\n")[0])
+            return
+        except Exception as e:
+            log.exception("picture failed")
+            self.fail(rid, "internal", f"{type(e).__name__}: {e}")
+            return
+        reply = self.chat.last_reply()
+        self.reply(rid, {
+            "path": str(pic.path), "prompt": pic.prompt, "seconds": round(pic.seconds, 2),
+            "message": message_info(reply) if reply else None,
+        })  # fmt: skip
+
+    async def picture_setup(self, p: dict[str, Any]) -> Any:
+        src = Path(str(p["path"]))
+        try:
+            load_workflow(src)
+        except ImageError as e:
+            raise RequestError("image", str(e)) from e
+        dest = self.workflow()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+        return {"workflow": str(dest)}
+
+    async def picture_look(self, p: dict[str, Any]) -> Any:
+        char = self.chat.character()
+        if char is None:
+            raise ChatError("no character in this session")
+        if "look" in p:
+            set_card_look(char.card, str(p["look"] or "") or None)
+            self.chat.store.update_character(char.id, char.card)
+        return {"look": card_look(char.card)}
 
     # ── memory work in the background ───────────────────────────────────────
 

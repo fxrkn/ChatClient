@@ -149,7 +149,7 @@ def test_mature_card_states_age_and_content():
     from chatclient.characters import card_content
 
     a = WizardAnswers(
-        name="Aras",
+        name="Kai",
         content="mature",
         age="31",
         gender=["man"],

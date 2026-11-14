@@ -24,9 +24,9 @@ def test_repetition_is_measured_in_any_language():
 
 
 def test_fresh_note_is_built_from_the_last_reply():
-    note = freshness.fresh_note(LOOP, "Furkan")
-    assert '"My breath hitches, a sharp intake…"' in note and "Furkan" in note
-    assert freshness.fresh_note("", "Furkan") == ""
+    note = freshness.fresh_note(LOOP, "Sam")
+    assert '"My breath hitches, a sharp intake…"' in note and "Sam" in note
+    assert freshness.fresh_note("", "Sam") == ""
 
 
 async def say(chat, text):

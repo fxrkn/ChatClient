@@ -170,7 +170,7 @@ async def test_character_wizard_mature_needs_an_adult_age(chat, tmp_path, capsys
     from chatclient.characters import card_content
 
     answers = [
-        "/char new", "Aras", "2",   # name, content: mature
+        "/char new", "Kai", "2",   # name, content: mature
         "16", "31",                 # under 18 is asked again
         "1", "runs a bar", "tall",  # gender, concept, appearance
         "6", "1", "1", "", "jazz", "",  # temperament, speech, values, fear, likes, background
@@ -182,10 +182,10 @@ async def test_character_wizard_mature_needs_an_adult_age(chat, tmp_path, capsys
     await run_script(chat, tmp_path, "\r".join(answers) + "\r")
     out = capsys.readouterr().out
     assert "18 or older" in out
-    aras = chat.store.find_character("Aras")
-    assert aras is not None and card_content(aras.card) == "mature"
-    assert aras.card.description.startswith("{{char}} is a 31-year-old man.")
-    assert "old friends who go back years. we kissed once." in aras.card.scenario
+    kai = chat.store.find_character("Kai")
+    assert kai is not None and card_content(kai.card) == "mature"
+    assert kai.card.description.startswith("{{char}} is a 31-year-old man.")
+    assert "old friends who go back years. we kissed once." in kai.card.scenario
     from chatclient.characters import card_initiative
 
-    assert card_initiative(chat.store.find_character("Aras").card) == "lead"
+    assert card_initiative(chat.store.find_character("Kai").card) == "lead"
