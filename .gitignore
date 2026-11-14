@@ -15,3 +15,6 @@ htmlcov/
 *.db-shm
 .env
 keys.json
+
+# local helper-agent settings
+.claude/
